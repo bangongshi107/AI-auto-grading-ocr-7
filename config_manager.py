@@ -18,7 +18,7 @@ class ConfigManager:
     def __init__(self):
         if ConfigManager._initialized:
             return
-        self.parser = configparser.ConfigParser(allow_no_value=True)
+        self.parser = configparser.ConfigParser(allow_no_value=True, interpolation=None)
         
         app_name = "AutoGraderApp"
         app_author = "Mr.Why"
@@ -223,7 +223,7 @@ class ConfigManager:
     def _save_config_to_file(self):
         """将内存中的配置保存到文件"""
         try:
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             
             # --- CHANGED: 保存 provider 而不是 url ---
             config['API'] = {

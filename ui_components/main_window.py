@@ -26,6 +26,7 @@ class MainWindow(QMainWindow):
     log_signal = pyqtSignal(str, bool, str)  # message, is_error, level
     progress_signal = pyqtSignal(int, int)
     finished_signal = pyqtSignal()
+    merge_requested_signal = pyqtSignal()  # 缓存合并请求信号
 
     def __init__(self, config_manager, api_service, worker):
         super().__init__()
@@ -613,6 +614,17 @@ class MainWindow(QMainWindow):
             question_index=question_index,
             is_single_q1_mode_active=self._is_single_q1_mode()
         )
+
+        # 连接配置更新信号，确保题目配置保存到文件
+        def on_config_updated():
+            self.log_message(f"题目{question_index}配置已更新，正在保存到文件...")
+            if self.config_manager.save_all_configs_to_file():
+                self.log_message("题目配置已成功保存到文件")
+            else:
+                self.log_message("警告：题目配置保存到文件失败", is_error=True)
+
+        dialog.config_updated.connect(on_config_updated)
+
         if dialog.exec_() == QDialog.Accepted:
             self.load_config_to_ui()
 
@@ -712,14 +724,6 @@ class MainWindow(QMainWindow):
     def request_merge_cache(self):
         """请求合并缓存记录"""
         # 通过信号发送到Application类
-        # 假设Application类有连接的槽
-        # 这里发出一个信号或者直接调用
-        # 由于MainWindow不知道Application实例，我们需要通过信号
-        # 临时：使用一个自定义信号
-        from PyQt5.QtCore import pyqtSignal
-        if not hasattr(self, 'merge_requested_signal'):
-            self.merge_requested_signal = pyqtSignal()
-            # 在Application中连接: self.main_window.merge_requested_signal.connect(self.manual_merge_records)
         self.merge_requested_signal.emit()
 
 # --- END OF FILE main_window.py ---

@@ -847,6 +847,12 @@ class QuestionConfigDialog(QDialog):
             # 发射信号通知配置已更新，由MainWindow负责保存到文件
             self.config_updated.emit()
 
+            # 关闭答案框窗口（如果存在且可见）
+            if hasattr(self.parent, 'answer_windows') and self.question_index in self.parent.answer_windows:
+                window = self.parent.answer_windows[self.question_index]
+                if window.isVisible():
+                    window.close()
+
             self.accept()
         except Exception as e:
             self.parent.log_message(f"保存配置出错: {str(e)}", is_error=True)
@@ -857,8 +863,6 @@ class QuestionConfigDialog(QDialog):
             # 当启用三步打分时，自动设置满分上限为60（高中作文默认）
             if checked:
                 self.max_score_edit.setValue(60)  # 三步打分默认60分
-            else:
-                self.max_score_edit.setValue(100)  # 禁用时恢复默认100分
 
             # 切换原有单点分数输入组的启用状态
             if self.original_score_input_group:
