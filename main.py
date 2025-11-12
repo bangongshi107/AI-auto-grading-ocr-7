@@ -121,9 +121,7 @@ class Application:
         self.main_window = MainWindow(self.config_manager, self.api_service, self.worker)
         self.signal_manager = SignalConnectionManager()
 
-        # 初始化缓存系统
-        self.cache_dir = pathlib.Path(__file__).parent / "阅卷记录" / ".cache"
-        self.cache_dir.mkdir(exist_ok=True, parents=True)
+
 
         self._setup_application()
 
@@ -237,12 +235,7 @@ class Application:
                     self.show_threshold_exceeded_notification # 这个方法内部需要调用 main_window.on_worker_error
                 )
 
-            # 合并缓存请求
-            if hasattr(self.main_window, 'merge_requested_signal'):
-                self.signal_manager.connect(
-                    self.main_window.merge_requested_signal,
-                    self.manual_merge_records
-                )
+
 
         except Exception as e:
             # 避免在 main_window 可能还未完全初始化时调用其 log_message
@@ -324,112 +317,7 @@ class Application:
         except Exception:
             return False
 
-    def cache_records(self, excel_filepath, rows, headers=None):
-        """缓存无法写入的记录"""
-        import json
-        excel_name = excel_filepath.name
-        cache_file = self.cache_dir / f"{excel_name}.json"
 
-        if cache_file.exists():
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            data['records'].extend(rows)
-        else:
-            data = {
-                'excel_path': str(excel_filepath),
-                'headers': headers,
-                'records': rows
-            }
-
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        count = len(data['records'])
-        excel_display_name = excel_name.replace('.xlsx', '')
-        self.main_window.update_cache_status(f"有{count}条新阅卷记录等待添加进[{excel_display_name}]，请选择 添加最新阅卷记录")
-        self.main_window.show_merge_button(True)
-
-    def check_and_merge_cache(self, excel_name):
-        """检查并合并指定Excel的缓存记录"""
-        import json
-        cache_file = self.cache_dir / f"{excel_name}.json"
-        if not cache_file.exists():
-            return
-
-        with open(cache_file, 'r', encoding='utf-8') as f:
-            cache_data = json.load(f)
-
-        excel_filepath = pathlib.Path(cache_data['excel_path'])
-        headers = cache_data['headers']
-        records = cache_data['records']
-
-        try:
-            # 读取现有Excel文件或创建新的
-            if excel_filepath.exists():
-                try:
-                    existing_df = pd.read_excel(excel_filepath, header=0)
-                    new_df = pd.DataFrame(records, columns=headers)
-                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-                except Exception as e:
-                    self.main_window.log_message(f"读取现有Excel文件失败: {str(e)}，将覆盖文件", True)
-                    combined_df = pd.DataFrame(records, columns=headers)
-            else:
-                combined_df = pd.DataFrame(records, columns=headers)
-
-            # 写入Excel文件并设置格式
-            with pd.ExcelWriter(excel_filepath, engine='openpyxl') as writer:
-                combined_df.to_excel(writer, index=False, sheet_name='阅卷记录')
-
-                # 获取工作簿和工作表
-                workbook = writer.book
-                worksheet = writer.sheets['阅卷记录']
-
-                # 设置列宽
-                column_widths = {
-                    'A': 15,  # 时间
-                    'B': 10,  # 题目编号
-                    'C': 10,  # API标识（单评模式下为学生答案摘要）
-                    'D': 10,  # 分差阈值（单评模式下为AI分项得分）
-                    'E': 100, # 学生答案摘要（单评）/学生答案摘要（双评）
-                    'F': 20,  # AI分项得分（单评）/AI分项得分（双评）
-                    'G': 200, # AI原始回复（单评）/AI原始回复（双评）
-                    'H': 15,  # 最终得分（单评）/AI原始总分（双评）
-                    'I': 12,  # 双评分差（双评）
-                    'J': 12,  # 最终得分（双评）
-                }
-
-                for col, width in column_widths.items():
-                    if col in worksheet.column_dimensions:
-                        worksheet.column_dimensions[col].width = width
-
-                # 设置自动换行
-                from openpyxl.styles import Alignment
-                wrap_alignment = Alignment(wrap_text=True, vertical='top')
-
-                for row in worksheet.iter_rows():
-                    for cell in row:
-                        cell.alignment = wrap_alignment
-
-                # 设置标题行格式
-                from openpyxl.styles import Font
-                header_font = Font(bold=True)
-                for cell in worksheet[1]:
-                    cell.font = header_font
-
-            self.main_window.log_message(f"成功合并 {len(records)} 条记录到 {excel_name}")
-            cache_file.unlink()
-            self.main_window.update_cache_status("")
-            self.main_window.show_merge_button(False)
-        except Exception as e:
-            self.main_window.log_message(f"合并缓存失败: {str(e)}", True)
-            excel_display_name = excel_name
-            self.main_window.update_cache_status(f"有{len(records)}条记录等待添加进[{excel_display_name}]，请选择 添加最新阅卷记录")
-
-    def manual_merge_records(self):
-        """手动触发合并所有缓存记录"""
-        for cache_file in self.cache_dir.glob('*.json'):
-            excel_name = cache_file.stem
-            self.check_and_merge_cache(excel_name)
 
     def _get_excel_filepath(self, record_data, worker=None):
         """获取Excel文件路径的辅助函数"""
@@ -600,154 +488,185 @@ class Application:
         重构后的保存阅卷记录到Excel文件的方法。
         - 动态构建Excel表头和行数据，支持单评和双评模式。
         - 设置列宽和格式，便于在Excel中查看。
-        - 增强错误处理和重试机制。
+        - 简化错误处理，直接缓存无法写入的记录。
         """
-        max_retries = 3
-        retry_delay = 1  # 秒
+        try:
+            # 记录汇总信息
+            if record_data.get('record_type') == 'summary':
+                return self._save_summary_record(record_data)
 
-        for attempt in range(max_retries):
-            try:
-                # 记录汇总信息
-                if record_data.get('record_type') == 'summary':
-                    return self._save_summary_record(record_data)
+            # --- 1. 准备文件路径 ---
+            excel_filepath = self._get_excel_filepath(record_data, self.worker)
+            excel_filename = excel_filepath.name
+            file_exists = excel_filepath.exists()
 
-                # --- 1. 准备文件路径 ---
-                excel_filepath = self._get_excel_filepath(record_data, self.worker)
-                excel_filename = excel_filepath.name
-                file_exists = excel_filepath.exists()
-
-                # --- 2. 动态构建表头和行 ---
-                is_dual = record_data.get('is_dual_evaluation', False)
-                timestamp_raw = record_data.get('timestamp', '')
-                if '_' in timestamp_raw:
-                    time_part = timestamp_raw.split('_')[1]
-                    if len(time_part) == 6:
-                        timestamp_str = f"{time_part[:2]}点{time_part[2:4]}分{time_part[4:6]}秒"
-                    else:
-                        timestamp_str = time_part
+            # --- 2. 动态构建表头和行 ---
+            is_dual = record_data.get('is_dual_evaluation', False)
+            timestamp_raw = record_data.get('timestamp', '')
+            if '_' in timestamp_raw:
+                time_part = timestamp_raw.split('_')[1]
+                if len(time_part) == 6:
+                    timestamp_str = f"{time_part[:2]}点{time_part[2:4]}分{time_part[4:6]}秒"
                 else:
-                    timestamp_str = timestamp_raw
-                question_index_str = f"题目{record_data.get('question_index', 0)}"
-                final_total_score_str = str(record_data.get('total_score', 0))
+                    timestamp_str = time_part
+            else:
+                timestamp_str = timestamp_raw
+            question_index_str = f"题目{record_data.get('question_index', 0)}"
+            final_total_score_str = str(record_data.get('total_score', 0))
 
-                headers = ["时间", "题目编号"]
-                rows_to_write = []
+            headers = ["时间", "题目编号"]
+            rows_to_write = []
 
-                if is_dual:
-                    headers.extend(["API标识", "分差阈值", "学生答案摘要", "AI分项得分", "AI原始回复", "AI原始总分", "双评分差", "最终得分"])
+            if is_dual:
+                headers.extend(["API标识", "分差阈值", "学生答案摘要", "AI分项得分", "AI原始回复", "AI原始总分", "双评分差", "最终得分"])
 
-                    row1 = [timestamp_str, question_index_str, "API-1",
-                           str(record_data.get('score_diff_threshold', "未提供")),
-                           record_data.get('api1_scoring_basis', '未提供'),
-                           str(record_data.get('api1_itemized_scores', [])),
-                           record_data.get('api1_raw_response', '未提供'),
-                           str(record_data.get('api1_raw_score', 0.0)),
-                           f"{record_data.get('score_difference', 0.0):.2f}",
-                           final_total_score_str]
-                    row2 = [timestamp_str, question_index_str, "API-2",
-                           str(record_data.get('score_diff_threshold', "未提供")),
-                           record_data.get('api2_scoring_basis', '未提供'),
-                           str(record_data.get('api2_itemized_scores', [])),
-                           record_data.get('api2_raw_response', '未提供'),
-                           str(record_data.get('api2_raw_score', 0.0)),
-                           f"{record_data.get('score_difference', 0.0):.2f}",
-                           final_total_score_str]
-                    rows_to_write.extend([row1, row2])
-                else: # 单评模式
-                    headers.extend(["学生答案摘要", "AI分项得分", "AI原始回复", "最终得分"])
+                row1 = [timestamp_str, question_index_str, "API-1",
+                       str(record_data.get('score_diff_threshold', "未提供")),
+                       record_data.get('api1_scoring_basis', '未提供'),
+                       str(record_data.get('api1_itemized_scores', [])),
+                       record_data.get('api1_raw_response', '未提供'),
+                       str(record_data.get('api1_raw_score', 0.0)),
+                       f"{record_data.get('score_difference', 0.0):.2f}",
+                       final_total_score_str]
+                row2 = [timestamp_str, question_index_str, "API-2",
+                       str(record_data.get('score_diff_threshold', "未提供")),
+                       record_data.get('api2_scoring_basis', '未提供'),
+                       str(record_data.get('api2_itemized_scores', [])),
+                       record_data.get('api2_raw_response', '未提供'),
+                       str(record_data.get('api2_raw_score', 0.0)),
+                       f"{record_data.get('score_difference', 0.0):.2f}",
+                       final_total_score_str]
+                rows_to_write.extend([row1, row2])
+            else: # 单评模式
+                headers.extend(["学生答案摘要", "AI分项得分", "AI原始回复", "最终得分"])
 
-                    single_row = [timestamp_str, question_index_str,
-                                 record_data.get('reasoning_basis', '无法提取'),
-                                 str(record_data.get('sub_scores', '未提供')),
-                                 record_data.get('raw_ai_response', '无法提取'),
-                                 final_total_score_str]
-                    rows_to_write.append(single_row)
+                single_row = [timestamp_str, question_index_str,
+                             record_data.get('reasoning_basis', '无法提取'),
+                             str(record_data.get('sub_scores', '未提供')),
+                             record_data.get('raw_ai_response', '无法提取'),
+                             final_total_score_str]
+                rows_to_write.append(single_row)
 
-                # --- 3. 写入Excel文件 ---
-                if file_exists:
-                    # 如果文件存在，读取现有数据并追加
-                    try:
-                        existing_df = pd.read_excel(excel_filepath, header=0)
-                        new_df = pd.DataFrame(rows_to_write, columns=headers)
-                        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-                    except Exception as e:
-                        self.main_window.log_message(f"读取现有Excel文件失败: {str(e)}，将覆盖文件", True)
-                        combined_df = pd.DataFrame(rows_to_write, columns=headers)
-                else:
+            # --- 3. 写入Excel文件 ---
+            if file_exists:
+                # 如果文件存在，读取现有数据并追加
+                try:
+                    existing_df = pd.read_excel(excel_filepath, header=0)
+                    new_df = pd.DataFrame(rows_to_write, columns=headers)
+                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+                except Exception as e:
+                    self.main_window.log_message(f"读取现有Excel文件失败: {str(e)}，将覆盖文件", True)
                     combined_df = pd.DataFrame(rows_to_write, columns=headers)
+            else:
+                combined_df = pd.DataFrame(rows_to_write, columns=headers)
 
-                # 使用openpyxl引擎写入并设置格式
-                with pd.ExcelWriter(excel_filepath, engine='openpyxl') as writer:
-                    combined_df.to_excel(writer, index=False, sheet_name='阅卷记录')
+            # 使用openpyxl引擎写入并设置格式
+            with pd.ExcelWriter(excel_filepath, engine='openpyxl') as writer:
+                combined_df.to_excel(writer, index=False, sheet_name='阅卷记录')
 
-                    # 获取工作簿和工作表
-                    workbook = writer.book
-                    worksheet = writer.sheets['阅卷记录']
+                # 获取工作簿和工作表
+                workbook = writer.book
+                worksheet = writer.sheets['阅卷记录']
 
-                    # 设置列宽
-                    column_widths = {
-                        'A': 15,  # 时间
-                        'B': 10,  # 题目编号
-                        'C': 10,  # API标识
-                        'D': 10,  # 分差阈值
-                        'E': 80,  # 学生答案摘要（增加宽度以容纳较长的AI回答）
-                        'F': 100, # 评分依据（增加宽度以容纳详细的评分理由）
-                        'G': 20,  # AI分项得分
-                        'H': 15,  # AI原始总分/最终得分
-                        'I': 12,  # 双评分差
-                        'J': 12,  # 最终得分
-                        'K': 200  # AI原始回复（增加宽度以容纳完整的JSON回复）
-                    }
+                # 设置列宽
+                column_widths = {
+                    'A': 15,  # 时间
+                    'B': 10,  # 题目编号
+                    'C': 10,  # API标识
+                    'D': 10,  # 分差阈值
+                    'E': 80,  # 学生答案摘要（增加宽度以容纳较长的AI回答）
+                    'F': 100, # 评分依据（增加宽度以容纳详细的评分理由）
+                    'G': 20,  # AI分项得分
+                    'H': 15,  # AI原始总分/最终得分
+                    'I': 12,  # 双评分差
+                    'J': 12,  # 最终得分
+                    'K': 200  # AI原始回复（增加宽度以容纳完整的JSON回复）
+                }
 
-                    for col, width in column_widths.items():
-                        if col in worksheet.column_dimensions:
-                            worksheet.column_dimensions[col].width = width
+                for col, width in column_widths.items():
+                    if col in worksheet.column_dimensions:
+                        worksheet.column_dimensions[col].width = width
 
-                    # 设置自动换行
-                    from openpyxl.styles import Alignment
-                    wrap_alignment = Alignment(wrap_text=True, vertical='top')
+                # 设置自动换行
+                from openpyxl.styles import Alignment
+                wrap_alignment = Alignment(wrap_text=True, vertical='top')
 
-                    for row in worksheet.iter_rows():
-                        for cell in row:
-                            cell.alignment = wrap_alignment
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        cell.alignment = wrap_alignment
 
-                    # 设置标题行格式
-                    from openpyxl.styles import Font
-                    header_font = Font(bold=True)
-                    for cell in worksheet[1]:
-                        cell.font = header_font
+                # 设置标题行格式
+                from openpyxl.styles import Font
+                header_font = Font(bold=True)
+                for cell in worksheet[1]:
+                    cell.font = header_font
 
-                self.main_window.log_message(f"已保存阅卷记录到: {excel_filename}")
-                return excel_filepath
+            self.main_window.log_message(f"已保存阅卷记录到: {excel_filename}")
+            return excel_filepath
 
-            except PermissionError as e:
-                # 文件被占用，尝试缓存
-                if attempt < max_retries - 1:
-                    self.main_window.log_message(f"文件被占用，{retry_delay}秒后重试 ({attempt + 1}/{max_retries})", True)
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
-                    continue
-                else:
-                    self.main_window.log_message("文件被占用，缓存记录以便稍后合并", True)
-                    self.cache_records(excel_filepath, rows_to_write, headers)
-                    return None
+        except PermissionError as e:
+            # 文件被占用，直接报错
+            self.main_window.log_message(f"保存阅卷记录失败: Excel文件被占用，请关闭文件后重试。文件路径: {excel_filepath}", True)
+            return None
 
-            except Exception as e:
-                error_detail_full = traceback.format_exc()
-                if attempt < max_retries - 1:
-                    self.main_window.log_message(f"保存阅卷记录失败，重试中 ({attempt + 1}/{max_retries}): {str(e)}", True)
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    # 最后一次尝试失败
-                    self.main_window.log_message(f"保存阅卷记录失败 (已重试{max_retries}次): {str(e)}\n详细错误:\n{error_detail_full}", True)
-                    # 尝试缓存失败的记录
-                    try:
-                        self.cache_records(excel_filepath, rows_to_write, headers)
-                    except Exception as cache_error:
-                        self.main_window.log_message(f"缓存记录也失败: {str(cache_error)}", True)
-                    return None
+        except Exception as e:
+            error_detail_full = traceback.format_exc()
+            self.main_window.log_message(f"保存阅卷记录失败: {str(e)}\n详细错误:\n{error_detail_full}", True)
+            return None
+
+    def check_excel_files_available(self):
+        """检查阅卷记录Excel文件是否可用（未被锁定且无临时文件）"""
+        try:
+            # 获取当前配置
+            dual_evaluation = self.config_manager.dual_evaluation_enabled
+            question_config = self.config_manager.get_question_config(1)  # 单题模式只处理第一题
+            full_score = question_config.get('max_score', 100) if question_config else 100
+
+            # 手动构建文件路径（避免使用_get_excel_filepath的复杂逻辑）
+            now = datetime.datetime.now()
+            date_str = now.strftime('%Y年%m月%d日')
+            evaluation_type = '双评' if dual_evaluation else '单评'
+            excel_filename = f"此题最高{full_score}分_{evaluation_type}.xlsx"
+
+            if getattr(sys, 'frozen', False):
+                base_dir = pathlib.Path(sys.executable).parent
+            else:
+                base_dir = pathlib.Path(__file__).parent
+
+            record_dir = base_dir / "阅卷记录"
+            date_dir = record_dir / date_str
+            excel_filepath = date_dir / excel_filename
+
+            # 检查是否存在Excel临时文件（表示文件正在被打开）
+            temp_file = date_dir / f"~${excel_filename}"
+            if temp_file.exists():
+                # 显示提醒对话框
+                from PyQt5.QtWidgets import QMessageBox
+                msg_box = QMessageBox(self.main_window)
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("无法开始阅卷")
+                msg_box.setText("检测到阅卷记录文件正在被其他程序打开。\n\n请关闭Excel文件，然后自动阅卷才能正常进行。")
+                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.exec_()
+                return False
+
+            # 检查文件是否被锁定
+            if excel_filepath.exists() and self.is_file_locked(excel_filepath):
+                # 显示提醒对话框
+                from PyQt5.QtWidgets import QMessageBox
+                msg_box = QMessageBox(self.main_window)
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("无法开始阅卷")
+                msg_box.setText("阅卷记录文件被锁定，请关闭相关程序后重试。")
+                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.exec_()
+                return False
+
+            return True
+
+        except Exception as e:
+            self.main_window.log_message(f"检查Excel文件可用性时出错: {str(e)}", is_error=True)
+            return False
 
     def start_auto_evaluation(self):
         """开始自动阅卷"""
@@ -759,6 +678,8 @@ class Application:
             self.worker.start()
         except Exception as e:
             self.main_window.log_message(f"运行自动阅卷失败: {str(e)}", is_error=True)
+            # 如果启动失败，确保UI状态正确
+            self.main_window.update_ui_state(is_running=False)
 
     def run(self):
         """运行应用程序"""

@@ -256,6 +256,39 @@ class AutoThread(QThread):
 
         return False
 
+    def _is_ai_requesting_image_content(self, student_answer_summary, scoring_basis):
+        """
+        检查AI是否在请求提供学生答案图片内容。
+        当AI无法从图片中提取有效信息时，会返回特定的提示内容。
+
+        Args:
+            student_answer_summary: AI返回的学生答案摘要
+            scoring_basis: AI返回的评分依据
+
+        Returns:
+            bool: True表示AI在请求图片内容，False表示正常响应
+        """
+        if not student_answer_summary or not scoring_basis:
+            return False
+
+        # 检查是否包含请求图片内容的关键词
+        request_keywords = [
+            "请提供学生答案图片内容",
+            "请提供学生答案图片",
+            "需要学生答案图片",
+            "无法获取图片内容",
+            "图片内容不可用"
+        ]
+
+        summary_lower = student_answer_summary.lower()
+        basis_lower = scoring_basis.lower()
+
+        for keyword in request_keywords:
+            if keyword in summary_lower or keyword in basis_lower:
+                return True
+
+        return False
+
     def _set_error_state(self, reason):
         """统一设置错误状态"""
         self.completion_status = "error"
@@ -341,9 +374,7 @@ class AutoThread(QThread):
                 answer_area_tuple = (x, y, width, height)
 
                 img_str = self.capture_answer_area(answer_area_tuple)
-                if not img_str:
-                    if not self.running: break
-                    continue
+                if not self.running: break  # 如果截取失败，整个流程已停止
 
                 # 构建JSON Prompt
                 self.log_signal.emit(f"为第 {question_index} 题 (类型: {question_type}) 构建Prompt...", False, "DETAIL")
@@ -358,19 +389,19 @@ class AutoThread(QThread):
                     img_str, text_prompt_for_api, q_config, dual_evaluation, score_diff_threshold
                 )
 
-                # 检查是否完全失败
+                # 检查是否完全失败，如果失败则完全停止阅卷
                 if eval_result is None:
-                    if not self.running: break
-                    continue
+                    self.log_signal.emit("评分处理完全失败，阅卷停止，等待用户手动操作", True, "ERROR")
+                    self._set_error_state("评分处理失败，需手动处理")
+                    break
 
                 score, reasoning_data, itemized_scores_data, confidence_data, raw_ai_response = eval_result
 
-                # 如果评分处理失败，仍然记录错误信息，但不输入分数
+                # 如果评分处理失败，完全停止阅卷，等待用户手动操作
                 if score is None:
-                    self.log_signal.emit(f"第 {question_index} 题评分失败，将记录错误信息但跳过分数输入", True, "ERROR")
-                    self.record_grading_result(question_index, 0, img_str, reasoning_data, itemized_scores_data, confidence_data)
-                    if not self.running: break
-                    continue
+                    self.log_signal.emit(f"第 {question_index} 题评分失败，阅卷完全停止，等待用户手动操作", True, "ERROR")
+                    self._set_error_state(f"第 {question_index} 题评分失败，需手动处理")
+                    break
 
                 # 输入分数
                 self.input_score(score, score_input_pos, confirm_button_pos, q_config)
@@ -446,38 +477,54 @@ class AutoThread(QThread):
         self.log_signal.emit("正在停止自动阅卷线程...", False, "INFO")
 
     def capture_answer_area(self, area):
-        """截取答案区域
+        """截取答案区域，带重试机制
 
         Args:
             area: 答案区域坐标 (x, y, width, height)
 
         Returns:
-            base64编码的图片字符串
+            base64编码的图片字符串，失败时直接停止整个流程
         """
-        try:
-            x, y, width, height = area
+        max_retries = 3
+        x, y, width, height = area
 
-            # 确保宽度和高度为正值
-            if width < 0:
-                x = x + width
-                width = abs(width)
-            if height < 0:
-                y = y + height
-                height = abs(height)
+        # 确保宽度和高度为正值
+        if width < 0:
+            x = x + width
+            width = abs(width)
+        if height < 0:
+            y = y + height
+            height = abs(height)
 
-            # 截取屏幕指定区域
-            screenshot = ImageGrab.grab(bbox=(x, y, x + width, y + height))
+        for attempt in range(max_retries):
+            try:
+                self.log_signal.emit(f"正在截取答案区域 (坐标: {x},{y}, 尺寸: {width}x{height}) - 尝试 {attempt + 1}/{max_retries}", False, "DETAIL")
 
-            # 转换为带Data URI前缀的base64字符串
-            buffered = BytesIO()
-            screenshot.save(buffered, format="JPEG")
-            base64_data = base64.b64encode(buffered.getvalue()).decode()
-            img_str = f"data:image/jpeg;base64,{base64_data}"
+                # 截取屏幕指定区域
+                screenshot = ImageGrab.grab(bbox=(x, y, x + width, y + height))
 
-            return img_str
-        except Exception as e:
-            self._set_error_state(f"截取答案区域出错: {str(e)}")
-            return None
+                # 转换为带Data URI前缀的base64字符串
+                buffered = BytesIO()
+                screenshot.save(buffered, format="JPEG")
+                base64_data = base64.b64encode(buffered.getvalue()).decode()
+                img_str = f"data:image/jpeg;base64,{base64_data}"
+
+                self.log_signal.emit(f"答案区域截取成功 (图片大小: {len(base64_data)} 字节)", False, "INFO")
+                return img_str
+
+            except Exception as e:
+                error_msg = f"截取答案区域失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}"
+                self.log_signal.emit(error_msg, True, "ERROR")
+
+                if attempt < max_retries - 1:
+                    # 不是最后一次尝试，等待后重试
+                    time.sleep(1)
+                    continue
+                else:
+                    # 最后一次尝试也失败了，直接停止整个流程
+                    final_error = f"截取答案区域失败，已重试{max_retries}次。坐标: ({x},{y}), 尺寸: {width}x{height}。错误: {str(e)}"
+                    self._set_error_state(final_error)
+                    return None  # 虽然不会被使用，但保持接口一致性
 
 
     def evaluate_answer(self, img_str, prompt, current_question_config, dual_evaluation=False, score_diff_threshold=10):
@@ -702,12 +749,18 @@ class AutoThread(QThread):
             itemized_scores_from_json = data.get("itemized_scores")
             confidence_data = {}  # 置信度功能暂时停用
 
-            self.log_signal.emit(f"AI回复摘要: {student_answer_summary}", False, "RESULT")
+            self.log_signal.emit(f"AI提取的学生答案摘要: {student_answer_summary}", False, "RESULT")
             self.log_signal.emit(f"AI评分依据: {scoring_basis}", False, "RESULT")
 
             # 检查是否为无法识别的情况，如果是则停止阅卷
             if self._is_unrecognizable_answer(student_answer_summary, itemized_scores_from_json):
                 error_msg = f"学生答案图片无法识别，停止阅卷。请检查图片质量或手动处理。AI反馈: {student_answer_summary}"
+                self.log_signal.emit(error_msg, True, "ERROR")
+                return False, error_msg
+
+            # 检查AI是否在请求提供学生答案图片内容，如果是则停止阅卷并等待用户介入
+            if self._is_ai_requesting_image_content(student_answer_summary, scoring_basis):
+                error_msg = f"AI无法从图片中提取有效信息，停止阅卷并等待用户手动介入。AI反馈摘要: {student_answer_summary}"
                 self.log_signal.emit(error_msg, True, "ERROR")
                 return False, error_msg
 

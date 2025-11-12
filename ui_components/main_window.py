@@ -2,6 +2,8 @@
 
 import sys
 import os
+import datetime
+import pathlib
 import traceback
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QMessageBox, QDialog,
                              QComboBox, QLineEdit, QCheckBox, QSpinBox,
@@ -26,7 +28,7 @@ class MainWindow(QMainWindow):
     log_signal = pyqtSignal(str, bool, str)  # message, is_error, level
     progress_signal = pyqtSignal(int, int)
     finished_signal = pyqtSignal()
-    merge_requested_signal = pyqtSignal()  # 缓存合并请求信号
+
 
     def __init__(self, config_manager, api_service, worker):
         super().__init__()
@@ -53,35 +55,7 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
 
-        # 添加缓存UI元素
-        self.cache_status_label = QLabel("")
-        self.cache_status_label.setStyleSheet("color: orange; font-weight: bold;")
-        self.merge_cache_button = QPushButton("添加最新阅卷记录")
-        self.merge_cache_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 8px 16px; border: none; border-radius: 4px; }"
-                                               "QPushButton:hover { background-color: #45a049; }"
-                                               "QPushButton:pressed { background-color: #3e8e41; }"
-                                               "QPushButton:disabled { background-color: #cccccc; color: #666666; }")
-        self.merge_cache_button.clicked.connect(self.request_merge_cache)
-        self.merge_cache_button.hide()
 
-        # 查找UI中的合适区域添加缓存控件（假设有一个水平布局区域）
-        # 这里需要根据实际UI文件找到合适的位置，比如日志区域上方
-        # 临时添加到一个假设的位置，实际使用时需要调整
-        from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout
-        # 假设有log_text布局的父级，添加缓存区域
-        log_widget = self.get_ui_element('log_text')
-        if log_widget and log_widget.parent():
-            parent_layout = log_widget.parent().layout()
-            if parent_layout:
-                # 创建水平布局添加缓存控件
-                cache_layout = QHBoxLayout()
-                cache_layout.addWidget(self.cache_status_label)
-                cache_layout.addStretch()
-                cache_layout.addWidget(self.merge_cache_button)
-
-                # 将缓存布局插入到日志上方
-                if hasattr(parent_layout, 'insertLayout'):
-                    parent_layout.insertLayout(parent_layout.count() - 1, cache_layout)
 
         self.show()
         self._is_initializing = False
@@ -275,12 +249,30 @@ class MainWindow(QMainWindow):
             msg_box.exec_()
             return
         self.log_message("所有配置已成功保存。")
-        
+
         # --- 核心修改: check_required_settings 现在直接使用 ConfigManager 的数据 ---
         if not self.check_required_settings():
             return # check_required_settings 内部会打日志和弹窗
-        
-        # ... 单题模式启动逻辑 ...
+
+        # 显示提醒对话框
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setWindowTitle("重要提醒")
+        msg_box.setText("AI阅卷时，务必关闭阅卷记录文件，否则阅卷记录无法被记录。\n\n请确认您已关闭Excel文件。")
+        ok_button = msg_box.addButton("我确认阅卷记录Excel文件已关闭，开始自动阅卷", QMessageBox.AcceptRole)
+        msg_box.setDefaultButton(ok_button)
+        msg_box.exec_()
+
+        # 用户确认后，显示倒计时并延迟启动
+        self.log_message("正在准备启动自动阅卷，请等待5秒...")
+        from PyQt5.QtCore import QTimer
+        countdown_timer = QTimer(self)
+        countdown_timer.setSingleShot(True)
+        countdown_timer.timeout.connect(lambda: self._start_auto_evaluation_after_confirmation())
+        countdown_timer.start(5000)  # 5秒后启动
+
+    def _start_auto_evaluation_after_confirmation(self):
+        """用户确认后延迟启动自动阅卷"""
         try:
             # 单题模式只处理第一题
             enabled_questions_indices = [1]
@@ -366,6 +358,79 @@ class MainWindow(QMainWindow):
             msg_box.exec_()
             return False
         return True
+
+    def check_excel_files_available(self):
+        """检查阅卷记录Excel文件是否可用（未被锁定且无临时文件）"""
+        try:
+            # 获取当前配置
+            dual_evaluation = self.config_manager.dual_evaluation_enabled
+            question_config = self.config_manager.get_question_config(1)  # 单题模式只处理第一题
+            full_score = question_config.get('max_score', 100) if question_config else 100
+
+            # 手动构建文件路径（避免使用_get_excel_filepath的复杂逻辑）
+            now = datetime.datetime.now()
+            date_str = now.strftime('%Y年%m月%d日')
+            evaluation_type = '双评' if dual_evaluation else '单评'
+            excel_filename = f"此题最高{full_score}分_{evaluation_type}.xlsx"
+
+            if getattr(sys, 'frozen', False):
+                base_dir = sys._MEIPASS
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+            record_dir = base_dir / "阅卷记录"
+            date_dir = record_dir / date_str
+            excel_filepath = date_dir / excel_filename
+
+            # 检查是否存在Excel临时文件（表示文件正在被打开）
+            temp_file = date_dir / f"~${excel_filename}"
+            if temp_file.exists():
+                # 显示提醒对话框
+                from PyQt5.QtWidgets import QMessageBox
+                msg_box = QMessageBox(self)
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("无法开始阅卷")
+                msg_box.setText("检测到阅卷记录文件正在被其他程序打开。\n\n请关闭Excel文件，然后自动阅卷才能正常进行。")
+                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.exec_()
+                return False
+
+            # 检查文件是否被锁定
+            if excel_filepath.exists() and self.is_file_locked(excel_filepath):
+                # 显示提醒对话框
+                from PyQt5.QtWidgets import QMessageBox
+                msg_box = QMessageBox(self)
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("无法开始阅卷")
+                msg_box.setText("阅卷记录文件被锁定，请关闭相关程序后重试。")
+                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.exec_()
+                return False
+
+            return True
+
+        except Exception as e:
+            # 显示友好的错误提示
+            from PyQt5.QtWidgets import QMessageBox
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Warning)
+            msg_box.setWindowTitle("检查文件状态失败")
+            msg_box.setText("请关闭阅卷记录文件，然后才能正常启动自动阅卷。")
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            msg_box.exec_()
+            self.log_message(f"检查Excel文件可用性时出错: {str(e)}", is_error=True)
+            return False
+
+    def is_file_locked(self, filepath):
+        """检查文件是否被锁定（主要因被其他进程打开）"""
+        try:
+            with open(filepath, 'a'):
+                pass
+            return False
+        except PermissionError:
+            return True
+        except Exception:
+            return False
     
     def test_api_connections(self):
         """测试API连接"""
@@ -707,23 +772,6 @@ class MainWindow(QMainWindow):
             if checkbox:
                 checkbox.stateChanged.connect(self.on_question_enabled_changed)
 
-    # 缓存合并相关方法
-    def update_cache_status(self, message):
-        """更新缓存状态显示"""
-        if hasattr(self, 'cache_status_label') and self.cache_status_label:
-            self.cache_status_label.setText(message)
 
-    def show_merge_button(self, show):
-        """显示或隐藏合并按钮"""
-        if hasattr(self, 'cache_status_label') and self.cache_status_label:
-            self.cache_status_label.setVisible(show)
-        if hasattr(self, 'merge_cache_button') and self.merge_cache_button:
-            self.merge_cache_button.setVisible(show)
-            self.merge_cache_button.setEnabled(show)
-
-    def request_merge_cache(self):
-        """请求合并缓存记录"""
-        # 通过信号发送到Application类
-        self.merge_requested_signal.emit()
 
 # --- END OF FILE main_window.py ---
