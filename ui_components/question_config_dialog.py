@@ -681,6 +681,9 @@ class QuestionConfigDialog(QDialog):
 
             # 设置为已确认模式
             answer_window.set_confirmed_mode()
+
+            # 关闭答案框窗口
+            answer_window.close()
         except Exception as e:
             self.parent.log_message(f"确认第{self.question_index}题答案区域出错: {str(e)}", is_error=True)
 
@@ -846,12 +849,6 @@ class QuestionConfigDialog(QDialog):
 
             # 发射信号通知配置已更新，由MainWindow负责保存到文件
             self.config_updated.emit()
-
-            # 关闭答案框窗口（如果存在且可见）
-            if hasattr(self.parent, 'answer_windows') and self.question_index in self.parent.answer_windows:
-                window = self.parent.answer_windows[self.question_index]
-                if window.isVisible():
-                    window.close()
 
             self.accept()
         except Exception as e:
