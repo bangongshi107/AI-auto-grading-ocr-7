@@ -62,6 +62,7 @@
 # ==============================================================================
 
 import requests
+import logging
 import traceback
 from typing import Tuple, Optional, Dict, Any
 import hashlib
@@ -157,9 +158,16 @@ PROVIDER_CONFIGS = {
     },
     "gemini": { # 新增
         "name": "Google Gemini",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",  # {model} 将被动态替换
         "auth_method": "google_api_key_in_url",
         "payload_builder": "_build_gemini_payload",
+        "dynamic_url": True,  # 标记需要动态URL替换
+    },
+    "baidu_ocr": { # 百度OCR服务
+        "name": "百度OCR",
+        "url": "https://aip.baidubce.com/rest/2.0/ocr/v1/handwriting",
+        "auth_method": "baidu_ocr_token",
+        "payload_builder": "_build_baidu_ocr_payload",
     }
 }
 
@@ -183,6 +191,7 @@ class ApiService:
     def __init__(self, config_manager):
         self.config_manager = config_manager
         self.session = requests.Session()
+        self.logger = logging.getLogger(__name__)
         # 初始化当前题目索引，虽然主要逻辑在AutoThread中，但这里有个默认值更安全
         self.current_question_index = 1
 
@@ -203,7 +212,7 @@ class ApiService:
     #  - 支持的 Region: "ap-guangzhou" (默认)
     # ==========================================================================
     def _build_tencent_signature_v3(self, secret_id: str, secret_key: str, service: str, region: str,
-                                   action: str, version: str, payload: str, host: str) -> str:
+                                   action: str, version: str, payload: str, host: str) -> Tuple[str, str]:
         """构建腾讯云 API 签名方法 v3
 
         Args:
@@ -216,7 +225,7 @@ class ApiService:
             payload: 请求 payload 的 JSON 字符串
 
         Returns:
-            tuple: (authorization_header, timestamp)
+            Tuple[str, str]: (authorization_header, timestamp)
         """
 
         # 1. 创建规范请求字符串
@@ -265,13 +274,13 @@ class ApiService:
     def set_current_question(self, index: int):
         self.current_question_index = index
 
-    def call_first_api(self, img_str: str, prompt: str) -> Tuple[Optional[str], Optional[str]]:
-        return self._call_api_by_group("first", img_str, prompt)
+    def call_first_api(self, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+        return self._call_api_by_group("first", img_str, prompt, ocr_text)
 
-    def call_second_api(self, img_str: str, prompt: str) -> Tuple[Optional[str], Optional[str]]:
-        return self._call_api_by_group("second", img_str, prompt)
+    def call_second_api(self, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+        return self._call_api_by_group("second", img_str, prompt, ocr_text)
 
-    def _call_api_by_group(self, api_group: str, img_str: str, prompt: str) -> Tuple[Optional[str], Optional[str]]:
+    def _call_api_by_group(self, api_group: str, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
         """根据API组别调用对应的预设供应商API"""
         try:
             if api_group == "first":
@@ -287,9 +296,9 @@ class ApiService:
 
             if not all([provider, api_key, model_id]):
                 return None, f"第{api_group}组API配置不完整 (供应商、Key或模型ID为空)"
-            
+
             print(f"[API] 准备调用 {api_group} API, 供应商: {provider}")
-            return self._execute_api_call(provider, api_key, model_id, img_str, prompt)
+            return self._execute_api_call(provider, api_key, model_id, img_str, prompt, ocr_text)
         except Exception as e:
             error_detail = traceback.format_exc()
             print(f"[API] 调用 {api_group} API 时发生严重错误: {str(e)}\n{error_detail}")
@@ -379,16 +388,39 @@ class ApiService:
 
             return f"{secret_id}:{secret_key}", None
 
+        elif auth_method == "google_api_key_in_url":
+            # Google Gemini API Key - 直接使用，无特殊格式要求
+            # API Key会被添加到URL参数中，不需要特殊处理
+            if len(api_key) < 20:  # 基本长度检查
+                return "", "Google API Key格式错误：Key长度过短"
+            return api_key, None
+
+        elif auth_method == "baidu_ocr_token":
+            # 百度OCR API Key - 直接使用
+            # 这是API Key部分，Secret Key在配置中单独存储
+            if len(api_key) < 10:
+                return "", "百度OCR API Key格式错误：Key长度过短"
+            return api_key, None
+
         # 其他鉴权方法直接返回
         return api_key, None
 
-    def _execute_api_call(self, provider: str, api_key: str, model_id: str, img_str: str, prompt: str) -> Tuple[Optional[str], Optional[str]]:
+    def _execute_api_call(self, provider: str, api_key: str, model_id: str, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+        # 在函数开始就获取provider_name，避免异常处理时未定义
+        provider_name = PROVIDER_CONFIGS.get(provider, {}).get("name", provider)
+        
         if provider not in PROVIDER_CONFIGS:
             return None, f"未知的供应商标识: {provider}"
 
         config = PROVIDER_CONFIGS[provider]
         url = config["url"]
-        headers = {"Content-Type": "application/json"}
+        
+        # 支持动态URL（例如Gemini需要在URL中包含模型名称）
+        if config.get("dynamic_url", False):
+            url = url.replace("{model}", model_id)
+        
+        headers = {}
+        use_json_format = True  # 默认使用JSON格式
         auth_method = config.get("auth_method", "bearer")
 
         # 预处理API Key
@@ -396,12 +428,26 @@ class ApiService:
         if key_error:
             return None, key_error
 
+        # 如果有OCR文本，将其添加到prompt中
+        enhanced_prompt = prompt
+        if ocr_text and ocr_text.strip():
+            enhanced_prompt = f"OCR识别的文字内容：\n{ocr_text.strip()}\n\n{prompt}"
+
+        # 防御性检查: 不允许在一次API调用中同时提供图像和OCR文本作为双重输入
+        if img_str and isinstance(img_str, str) and img_str.strip() and ocr_text and isinstance(ocr_text, str) and ocr_text.strip():
+            return None, "禁止同时提供图像和OCR文本作为输入，请选择纯视觉模式或OCR文本模式。"
+
         # 先构建 payload，因为腾讯签名需要用到它
         try:
             builder_func = getattr(self, config["payload_builder"])
-            payload = builder_func(model_id, img_str, prompt)
+            payload = builder_func(model_id, img_str, enhanced_prompt)
         except Exception as e:
             return None, f"构建请求体失败: {e}"
+
+        # 特殊处理百度OCR：使用form-data格式
+        if provider == "baidu_ocr":
+            use_json_format = False
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
 
         # 鉴权处理
         if auth_method == "bearer":
@@ -429,36 +475,189 @@ class ApiService:
             headers["X-TC-Version"] = version
             headers["X-TC-Action"] = action
             headers["X-TC-Region"] = region
+        elif auth_method == "baidu_ocr_token":
+            # 百度OCR Token鉴权 - 基于用户教程
+            # 获取Access Token
+            token_url = "https://aip.baidubce.com/oauth/2.0/token"
+            token_params = {
+                "grant_type": "client_credentials",
+                "client_id": processed_key,  # API Key
+                "client_secret": self.config_manager.baidu_ocr_secret_key  # Secret Key
+            }
 
+            try:
+                self.logger.debug("准备获取百度OCR Access Token")
+                token_response = self.session.post(token_url, data=token_params, timeout=10)
+                token_data = token_response.json()
+
+                if "access_token" in token_data:
+                    access_token = token_data["access_token"]
+                    # 添加到URL参数中
+                    url += f"?access_token={access_token}"
+                    self.logger.debug("百度OCR Access Token 获取成功")
+                else:
+                    self.logger.warning(f"百度OCR Token返回结果不包含access_token: {token_data}")
+                    return None, f"获取百度OCR Access Token失败: {token_data}"
+            except Exception as e:
+                self.logger.exception("百度OCR Token获取异常")
+                return None, f"百度OCR Token获取异常: {str(e)}"
+
+        # 通用请求发送逻辑（所有认证方式共享）
         try:
-            response = self.session.post(url, headers=headers, json=payload, timeout=60)
+            self.logger.debug(f"[{provider_name}] 发送API请求到: {url}")
+            
+            # 根据格式选择传递方式
+            if use_json_format:
+                headers["Content-Type"] = "application/json"
+                response = self.session.post(url, headers=headers, json=payload, timeout=60)
+            else:
+                # form-data格式（用于百度OCR等）
+                response = self.session.post(url, headers=headers, data=payload, timeout=60)
 
+            self.logger.debug(f"[{provider_name}] 收到响应: 状态码 {response.status_code}")
+            
             if response.status_code == 200:
                 content = self._extract_response_content(response.json(), provider)
                 if content:
+                    self.logger.debug(f"[{provider_name}] 成功提取响应内容")
                     return content, None
                 else:
+                    self.logger.warning(f"[{provider_name}] 响应内容为空或无法解析")
                     return None, f"API响应内容为空或无法解析。原始响应: {str(response.json())[:200]}"
             else:
                 error_text = response.text[:200]
+                self.logger.warning(f"[{provider_name}] API请求失败: {response.status_code}")
                 friendly_error = self._create_api_error_message(provider, response.status_code, error_text)
                 return None, friendly_error
+        except requests.exceptions.Timeout:
+            self.logger.warning(f"[{provider_name}] 请求超时")
+            return None, f"[{provider_name}] 请求超时，请检查网络连接或稍后重试"
+        except requests.exceptions.ConnectionError as e:
+            self.logger.warning(f"[{provider_name}] 连接失败: {str(e)[:100]}")
+            return None, f"[{provider_name}] 无法连接到服务器，请检查网络设置"
         except requests.exceptions.RequestException as e:
+            self.logger.exception(f"[{provider_name}] 网络请求异常")
             friendly_error = self._create_network_error_message(e)
             return None, friendly_error
 
     def _extract_response_content(self, data: Dict[str, Any], provider: str) -> Optional[str]:
-        """从API响应中提取内容"""
+        """从API响应中提取内容
+        
+        支持的提供商响应格式：
+        - OpenAI兼容格式: openai, moonshot, openrouter, zhipu, volcengine, aliyun, baidu
+        - 腾讯混元格式: tencent
+        - Google Gemini格式: gemini
+        - 百度OCR格式: baidu_ocr
+        """
         try:
+            # OpenAI兼容格式 - 标准的 choices[0].message.content
             if provider in ["openai", "moonshot", "openrouter", "zhipu", "volcengine", "aliyun", "baidu"]:
                 return data["choices"][0]["message"]["content"]
-            if provider == "gemini":
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+            
+            # 腾讯混元 - 使用相同的OpenAI兼容格式
             if provider == "tencent":
                 return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError):
+            
+            # Google Gemini - 特殊格式
+            if provider == "gemini":
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            
+            # 百度OCR - 特殊的OCR响应格式
+            if provider == "baidu_ocr":
+                # 百度OCR响应格式处理 - 支持handwriting和doc_analysis格式
+                # Return a plain text merged result for legacy flows
+                if "results" in data and data["results"]:
+                    # handwriting API格式：results -> words -> word
+                    words = []
+                    for result in data["results"]:
+                        if "words" in result and isinstance(result["words"], dict):
+                            word_text = result["words"].get("word", "")
+                            if word_text:
+                                # 可选：添加置信度信息（如果有）
+                                if "probability" in result["words"] and "average" in result["words"]["probability"]:
+                                    confidence = result["words"]["probability"]["average"]
+                                    if confidence < 0.8:  # 置信度低于80%标记
+                                        word_text += f" (低置信度:{confidence:.2f})"
+                                words.append(word_text)
+                    if words:
+                        return "\n".join(words)
+                    else:
+                        return "OCR未能识别到文字"
+                elif "words_result" in data and data["words_result"]:
+                    # doc_analysis API格式：words_result数组
+                    words = []
+                    for item in data["words_result"]:
+                        if "words" in item:
+                            word_text = item["words"]
+                            # 可选：添加置信度信息
+                            if "probability" in item and "average" in item["probability"]:
+                                confidence = item["probability"]["average"]
+                                if confidence < 0.8:  # 置信度低于80%标记
+                                    word_text += f" (低置信度:{confidence:.2f})"
+                            words.append(word_text)
+                    if words:
+                        return "\n".join(words)
+                    else:
+                        return "OCR未能识别到文字"
+                else:
+                    return "OCR未能识别到文字"
+        except (KeyError, IndexError, TypeError) as e:
+            print(f"解析{provider}响应失败: {e}")
             return None # 解析失败
         return str(data) # Fallback
+
+    # 新: 专用方法用于获取百度 doc_analysis 的原始结构化结果（便于置信度分析）
+    def call_baidu_doc_analysis_structured(self, img_str: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """
+        调用百度doc_analysis接口并返回未被处理的JSON结构，便于分析每行置信度等信息。
+        Returns: (data_dict, error_message)
+        """
+        try:
+            # token 获取
+            token_url = "https://aip.baidubce.com/oauth/2.0/token"
+            token_params = {
+                "grant_type": "client_credentials",
+                "client_id": self.config_manager.baidu_ocr_api_key,
+                "client_secret": self.config_manager.baidu_ocr_secret_key
+            }
+            token_response = self.session.post(token_url, data=token_params, timeout=10)
+            token_data = token_response.json()
+            if "access_token" not in token_data:
+                return None, f"获取百度OCR access_token失败: {token_data}"
+            access_token = token_data["access_token"]
+
+            # doc_analysis endpoint
+            url = "https://aip.baidubce.com/rest/2.0/ocr/v1/doc_analysis"
+            url += f"?access_token={access_token}"
+
+            pure_base64 = self._get_pure_base64(img_str)
+            # 🎯 优化后的参数配置（v2.0 - 2025-12-12）
+            # - 输入：经过预处理的手写答案图像（灰度化+二值化+去噪）
+            # - 目标：准确识别手写内容，忽略涂改部分
+            # - 策略：纯文本识别+质量检测，质量差时人工介入
+            # - 优化：移除无效参数，减少API调用开销
+            payload = {
+                "image": pure_base64,
+                "language_type": "CHN_ENG",      # 中英文混合
+                "result_type": "big",             # 行级结果（已足够精确）
+                "words_type": "handprint_mix",   # 明确指定手写印刷混排模式
+                "line_probability": True,         # ✅ 必需：置信度检测
+                "recg_alter": True,               # ✅ 必需：涂改检测（用于完全忽略涂改行）
+                # ✅ 优化说明：已移除无效参数
+                # - detect_direction: 答题卡方向已固定，无需检测
+                # - detect_language: 已明确指定CHN_ENG，无需额外检测
+                # - layout_analysis: 已框定答案区域，不需要版面分析
+                # - recg_formula/recg_long_division: 暂不使用特殊格式识别
+            }
+
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            response = self.session.post(url, headers=headers, data=payload, timeout=30)
+            if response.status_code != 200:
+                return None, f"百度DocAnalysis请求失败: {response.status_code} {response.text[:200]}"
+            return response.json(), None
+        except Exception as e:
+            self.logger.exception("调用百度文档分析接口异常")
+            return None, f"调用百度文档分析接口异常: {str(e)}"
 
     def _get_pure_base64(self, img_str: str) -> str:
         if not img_str: return ""
@@ -621,6 +820,28 @@ class ApiService:
             }]
         }
 
+    def _build_baidu_ocr_payload(self, model_id, img_str, prompt):
+        """专为百度OCR定制 - 手写文字识别
+
+        基于用户提供的百度OCR教程实现：
+        - 使用手写文字识别API端点
+        - 参数通过form data传递
+        - 支持多种配置选项
+        """
+        # 百度OCR不使用model_id参数，而是使用固定的API端点
+        # prompt参数在这里不使用，因为OCR主要关注图片内容
+        if not img_str:
+            return {}
+
+        pure_base64 = self._get_pure_base64(img_str)
+        return {
+            "image": pure_base64,
+            "language_type": "CHN_ENG",  # 中英文混合
+            "detect_direction": "true",   # 检测图像朝向
+            "detect_language": "true",    # 检测语言
+            "probability": "true"        # 返回识别结果中每一行的置信度
+        }
+
     def _create_api_error_message(self, provider: str, status_code: int, response_text: str) -> str:
         """根据API返回的错误，生成对用户更友好的错误信息。"""
         provider_name = PROVIDER_CONFIGS.get(provider, {}).get("name", provider)
@@ -666,5 +887,106 @@ class ApiService:
         保留此空方法以防止旧代码调用时出错。
         """
         pass
+
+    def validate_provider_configuration(self) -> Dict[str, Any]:
+        """
+        验证所有配置的API提供商是否有完整的实现
+        
+        Returns:
+            Dict: 验证结果，包含每个提供商的实现状态
+        """
+        validation_results = {}
+        
+        for provider_id, config in PROVIDER_CONFIGS.items():
+            result = {
+                "provider_id": provider_id,
+                "name": config.get("name", "未命名"),
+                "has_url": bool(config.get("url")),
+                "has_auth_method": bool(config.get("auth_method")),
+                "has_payload_builder": bool(config.get("payload_builder")),
+                "payload_builder_exists": False,
+                "response_parser_exists": False,
+                "is_complete": False
+            }
+            
+            # 检查payload构建器是否存在
+            builder_name = config.get("payload_builder", "")
+            if builder_name and hasattr(self, builder_name):
+                result["payload_builder_exists"] = True
+            
+            # 检查响应解析器是否支持该提供商
+            # 通过检查 _extract_response_content 中是否有该provider的处理
+            supported_providers = [
+                "openai", "moonshot", "openrouter", "zhipu", "volcengine", 
+                "aliyun", "baidu", "tencent", "gemini", "baidu_ocr"
+            ]
+            result["response_parser_exists"] = provider_id in supported_providers
+            
+            # 判断是否完整
+            result["is_complete"] = (
+                result["has_url"] and 
+                result["has_auth_method"] and 
+                result["has_payload_builder"] and 
+                result["payload_builder_exists"] and 
+                result["response_parser_exists"]
+            )
+            
+            validation_results[provider_id] = result
+        
+        return validation_results
+
+# ==============================================================================
+#  配置验证和诊断函数 (Configuration Validation and Diagnostics)
+# ==============================================================================
+def validate_all_providers() -> None:
+    """
+    验证所有API提供商的配置完整性
+    用于开发和调试目的
+    """
+    print("=" * 80)
+    print("API提供商配置验证报告")
+    print("=" * 80)
+    
+    # 创建临时实例进行验证
+    class MockConfigManager:
+        """模拟配置管理器用于验证"""
+        pass
+    
+    service = ApiService(MockConfigManager())
+    results = service.validate_provider_configuration()
+    
+    complete_count = 0
+    incomplete_count = 0
+    
+    for provider_id, result in results.items():
+        status = "✅ 完整" if result["is_complete"] else "❌ 不完整"
+        print(f"\n{status} [{provider_id}] {result['name']}")
+        
+        if result["is_complete"]:
+            complete_count += 1
+        else:
+            incomplete_count += 1
+            # 显示缺失的部分
+            issues = []
+            if not result["has_url"]:
+                issues.append("缺少URL配置")
+            if not result["has_auth_method"]:
+                issues.append("缺少认证方法")
+            if not result["has_payload_builder"]:
+                issues.append("缺少payload构建器配置")
+            if not result["payload_builder_exists"]:
+                issues.append("payload构建器未实现")
+            if not result["response_parser_exists"]:
+                issues.append("响应解析器未实现")
+            
+            print(f"   问题: {', '.join(issues)}")
+    
+    print("\n" + "=" * 80)
+    print(f"验证摘要: 完整 {complete_count} 个, 不完整 {incomplete_count} 个")
+    print("=" * 80)
+
+# 如果直接运行此文件，执行验证
+if __name__ == "__main__":
+    validate_all_providers()
 
 # --- END OF FILE api_service.py ---

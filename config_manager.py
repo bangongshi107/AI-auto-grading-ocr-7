@@ -5,6 +5,30 @@ import os
 import sys
 import appdirs
 
+# ==============================================================================
+#  OCR质量等级映射配置 (OCR Quality Level Mapping)
+# ==============================================================================
+
+OCR_QUALITY_UI_TO_INTERNAL = {
+    '宽松': 'relaxed',
+    '适度': 'moderate',
+    '严格': 'strict'
+}
+
+OCR_QUALITY_INTERNAL_TO_UI = {
+    'relaxed': '宽松',
+    'moderate': '适度',
+    'strict': '严格'
+}
+
+def get_ocr_quality_internal_value(ui_text: str) -> str:
+    """将UI显示文本转换为内部标识"""
+    return OCR_QUALITY_UI_TO_INTERNAL.get(ui_text, 'moderate')
+
+def get_ocr_quality_ui_text(internal_value: str) -> str:
+    """将内部标识转换为UI显示文本"""
+    return OCR_QUALITY_INTERNAL_TO_UI.get(internal_value, '适度')
+
 class ConfigManager:
     """配置管理器,负责保存和加载配置"""
     _instance = None
@@ -19,7 +43,7 @@ class ConfigManager:
         if ConfigManager._initialized:
             return
         self.parser = configparser.ConfigParser(allow_no_value=True, interpolation=None)
-        
+
         app_name = "AutoGraderApp"
         app_author = "Mr.Why"
 
@@ -27,10 +51,28 @@ class ConfigManager:
             self.config_dir = appdirs.user_config_dir(app_name, app_author)
         else:
             self.config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting")
-        
+
         self.config_file_path = os.path.join(self.config_dir, "config.ini")
         os.makedirs(self.config_dir, exist_ok=True)
+
+        # OCR模式：使用索引而非文本，UI文本可随意修改
+        # 索引 0 = 第一个选项（纯AI模式）
+        # 索引 1 = 第二个选项（百度OCR模式）
+        # 注意：索引顺序必须与UI文件中的下拉框选项顺序一致
+        self.OCR_MODE_PURE_AI = 0
+        self.OCR_MODE_BAIDU_OCR = 1
         
+        # 为了兼容旧配置文件，保留文本到索引的映射
+        self._legacy_ocr_text_to_index = {
+            "纯AI识图阅卷": self.OCR_MODE_PURE_AI,
+            "百度智能云OCR文字识别+AI评阅": self.OCR_MODE_BAIDU_OCR,
+            "百度智能云文字识别+AI评阅": self.OCR_MODE_BAIDU_OCR,
+            "百度OCR识别文字+AI评阅": self.OCR_MODE_BAIDU_OCR,
+            "百度智能云手写OCR识别文字+AI评阅": self.OCR_MODE_BAIDU_OCR,
+            "pure_ai": self.OCR_MODE_PURE_AI,
+            "baidu_ocr": self.OCR_MODE_BAIDU_OCR,
+        }
+
         self.max_questions = 4
         self._init_default_config()
         self.load_config()
@@ -51,6 +93,19 @@ class ConfigManager:
         self.subject = ""
         self.cycle_number = 1
         self.wait_time = 2
+
+        # OCR配置（使用索引，0=纯AI，1=百度OCR）
+        self.ocr_mode_index = self.OCR_MODE_PURE_AI  # 默认使用纯AI模式
+        self.baidu_ocr_api_key = ""
+        self.baidu_ocr_secret_key = ""
+        # OCR质量等级（新增）：relaxed/moderate/strict
+        self.ocr_quality_level = "moderate"  # 默认适度
+        # 分数步长（新增）：0.5或1
+        self.score_rounding_step = 0.5  # 默认0.5步长
+        # OCR质量阈值（默认，保留用于向后兼容）
+        self.ocr_confidence_avg_threshold = 0.75
+        self.ocr_confidence_min_threshold = 0.6
+        self.ocr_confidence_low_line_ratio = 0.3
         
         self.question_configs = {}
         for i in range(1, self.max_questions + 1):
@@ -103,6 +158,24 @@ class ConfigManager:
         self.subject = self._get_config_safe('UI', 'subject', "")
         self.cycle_number = self._get_config_safe('Auto', 'cycle_number', 1, int)
         self.wait_time = self._get_config_safe('Auto', 'wait_time', 2, int)
+
+        # 加载OCR配置（使用索引）
+        ocr_mode_raw = self._get_config_safe('OCR', 'ocr_mode_index', self.OCR_MODE_PURE_AI)
+        self.ocr_quality_level = self._get_config_safe('OCR', 'ocr_quality_level', 'moderate')
+        self.score_rounding_step = float(self._get_config_safe('OCR', 'score_rounding_step', 0.5))
+        
+        # 兼容处理：如果是数字索引，直接使用；如果是旧版文本/标识符，转换为索引
+        try:
+            self.ocr_mode_index = int(ocr_mode_raw)
+        except (ValueError, TypeError):
+            # 旧版本可能保存的是文本或内部标识符，进行转换
+            self.ocr_mode_index = self._legacy_ocr_text_to_index.get(str(ocr_mode_raw), self.OCR_MODE_PURE_AI)
+        self.baidu_ocr_api_key = self._get_config_safe('OCR', 'baidu_ocr_api_key', "")
+        self.baidu_ocr_secret_key = self._get_config_safe('OCR', 'baidu_ocr_secret_key', "")
+        # 加载OCR质量阈值
+        self.ocr_confidence_avg_threshold = float(self._get_config_safe('OCR', 'ocr_confidence_avg_threshold', self.ocr_confidence_avg_threshold))
+        self.ocr_confidence_min_threshold = float(self._get_config_safe('OCR', 'ocr_confidence_min_threshold', self.ocr_confidence_min_threshold))
+        self.ocr_confidence_low_line_ratio = float(self._get_config_safe('OCR', 'ocr_confidence_low_line_ratio', self.ocr_confidence_low_line_ratio))
         
         for i in range(1, self.max_questions + 1):
             section_name = f'Question{i}'
@@ -134,7 +207,7 @@ class ConfigManager:
         if '1' in self.question_configs:
             self.question_configs['1']['enabled'] = True
 
-    def _get_config_safe(self, section, option, default_value, value_type=str):
+    def _get_config_safe(self, section, option, default_value, value_type: type = str):
         """安全地获取配置值"""
         try:
             if not self.parser.has_section(section) or not self.parser.has_option(section, option):
@@ -183,6 +256,19 @@ class ConfigManager:
         elif field_name == 'wait_time': self.wait_time = max(2, int(value)) if value else 2
         elif field_name == 'dual_evaluation_enabled': self.dual_evaluation_enabled = bool(value)
         elif field_name == 'score_diff_threshold': self.score_diff_threshold = max(1, int(value)) if value else 5
+        elif field_name == 'ocr_mode_index': 
+            try:
+                self.ocr_mode_index = int(value) if value is not None else self.OCR_MODE_PURE_AI
+            except (ValueError, TypeError):
+                self.ocr_mode_index = self.OCR_MODE_PURE_AI
+        elif field_name == 'baidu_ocr_api_key': self.baidu_ocr_api_key = str(value) if value else ""
+        elif field_name == 'baidu_ocr_secret_key': self.baidu_ocr_secret_key = str(value) if value else ""
+        elif field_name == 'ocr_quality_level': self.ocr_quality_level = str(value) if value else 'moderate'
+        elif field_name == 'score_rounding_step':
+            try:
+                self.score_rounding_step = float(value) if value is not None else 0.5
+            except (ValueError, TypeError):
+                self.score_rounding_step = 0.5
         elif field_name.startswith('question_'): self._update_question_config_from_field_name(field_name, value)
         else:
             # 忽略未知的配置字段，比如旧的 'first_api_url'
@@ -227,16 +313,27 @@ class ConfigManager:
             
             # --- CHANGED: 保存 provider 而不是 url ---
             config['API'] = {
-                'first_api_provider': self.first_api_provider,
-                'first_api_key': self.first_api_key,
-                'first_modelID': self.first_modelID,
-                'second_api_provider': self.second_api_provider,
-                'second_api_key': self.second_api_key,
-                'second_modelID': self.second_modelID,
+                'first_api_provider': str(self.first_api_provider),
+                'first_api_key': str(self.first_api_key),
+                'first_modelID': str(self.first_modelID),
+                'second_api_provider': str(self.second_api_provider),
+                'second_api_key': str(self.second_api_key),
+                'second_modelID': str(self.second_modelID),
             }
-            config['UI'] = {'subject': self.subject}
+            config['UI'] = {'subject': str(self.subject)}
             config['Auto'] = {'cycle_number': str(self.cycle_number), 'wait_time': str(self.wait_time)}
             config['DualEvaluation'] = {'enabled': str(self.dual_evaluation_enabled), 'score_diff_threshold': str(self.score_diff_threshold)}
+            # 保存索引值（与UI文本无关）
+            config['OCR'] = {
+                'ocr_mode_index': str(self.ocr_mode_index),
+                'baidu_ocr_api_key': str(self.baidu_ocr_api_key),
+                'baidu_ocr_secret_key': str(self.baidu_ocr_secret_key),
+                'ocr_quality_level': str(self.ocr_quality_level),
+                'score_rounding_step': str(self.score_rounding_step),
+                'ocr_confidence_avg_threshold': str(self.ocr_confidence_avg_threshold),
+                'ocr_confidence_min_threshold': str(self.ocr_confidence_min_threshold),
+                'ocr_confidence_low_line_ratio': str(self.ocr_confidence_low_line_ratio),
+            }
             
             for i in range(1, self.max_questions + 1):
                 section_name = f'Question{i}'
@@ -283,6 +380,10 @@ class ConfigManager:
     def get_question_config(self, question_index):
         return self.question_configs.get(str(question_index), {'enabled': False})
 
+    def is_baidu_ocr_mode(self):
+        """判断当前是否为百度OCR模式"""
+        return self.ocr_mode_index == self.OCR_MODE_BAIDU_OCR
+    
     def check_required_settings(self):
         # 简化检查，MainWindow将负责UI层面的验证提示
         if not self.first_api_key or not self.first_modelID or not self.first_api_provider:

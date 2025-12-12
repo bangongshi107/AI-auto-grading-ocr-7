@@ -2,13 +2,27 @@ import sys
 import os
 import datetime
 import pathlib
+import warnings
+
+# 过滤PyQt5的弃用警告
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='PyQt5')
+
+# 设置Windows控制台输出编码为UTF-8，解决中文乱码问题
+if sys.platform == 'win32':
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass  # 如果设置失败，继续使用默认编码
+
 from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 from ui_components.main_window import MainWindow
 from api_service import ApiService
 from config_manager import ConfigManager
-from auto_thread import AutoThread
+from auto_thread import GradingThread
 import winsound
 import csv
 import traceback
@@ -25,7 +39,16 @@ class SimpleNotificationDialog(QDialog):
         self.setWindowTitle(title)
         self.setMinimumSize(300, 100)
         self.setMaximumSize(600, 400)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        # Set the WindowStaysOnTopHint flag when available (guarded to satisfy static type checkers)
+        try:
+            flags = self.windowFlags()
+            ws = getattr(Qt, 'WindowStaysOnTopHint', None)
+            if ws is not None:
+                flags |= ws
+            self.setWindowFlags(flags)
+        except Exception:
+            # Fallback: silently ignore if window flags API is not available
+            pass
 
         layout = QVBoxLayout()
 
@@ -62,10 +85,11 @@ class SimpleNotificationDialog(QDialog):
         try:
             if self.sound_type == 'error':
                 # 系统错误声音
-                winsound.MessageBeep(winsound.MB_ICONERROR)
+                # Use default system sound; keep it simple and cross-version compatible
+                winsound.MessageBeep(-1)
             else:
                 # 系统信息声音
-                winsound.MessageBeep(winsound.MB_ICONINFORMATION)
+                winsound.MessageBeep(-1)
         except Exception:
             # 如果系统声音不可用，使用默认beep
             try:
@@ -73,11 +97,11 @@ class SimpleNotificationDialog(QDialog):
             except Exception:
                 pass  # 完全静默失败
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         """窗口关闭时停止定时器"""
         if hasattr(self, 'sound_timer'):
             self.sound_timer.stop()
-        super().closeEvent(event)
+        super().closeEvent(a0) 
 
     def accept(self):
         """点击确定时停止定时器"""
@@ -86,12 +110,96 @@ class SimpleNotificationDialog(QDialog):
         super().accept()
 
 
+class ManualInterventionDialog(QDialog):
+    """专用于人工介入提示的模态对话框，带重复提示音和明确的继续/停止按钮"""
+    def __init__(self, title, message, raw_feedback=None, sound_type='error', parent=None):
+        super().__init__(parent)
+        self.sound_type = sound_type
+        self.raw_feedback = raw_feedback or ''
+        self.setup_ui(title, message)
+        self.setup_sound_timer()
+
+    def setup_ui(self, title, message):
+        self.setWindowTitle(title)
+        self.setMinimumSize(420, 220)
+        self.setMaximumSize(900, 600)
+        try:
+            flags = self.windowFlags()
+            ws = getattr(Qt, 'WindowStaysOnTopHint', None)
+            if ws is not None:
+                flags |= ws
+            self.setWindowFlags(flags)
+        except Exception:
+            pass
+
+        layout = QVBoxLayout()
+
+        # 主消息
+        msg_label = QLabel(message)
+        msg_label.setFont(QFont("Arial", 12))
+        msg_label.setWordWrap(True)
+        msg_label.setStyleSheet("padding: 12px;")
+        layout.addWidget(msg_label)
+
+        # 原始反馈（可折叠/展示）
+        fb_label = QLabel("检测到的AI原始反馈（仅供参考）：\n" + (self.raw_feedback[:1000] or "(无)") )
+        fb_label.setFont(QFont("Arial", 10))
+        fb_label.setWordWrap(True)
+        fb_label.setStyleSheet("padding: 6px; color: #333333; background: #f7f7f7; border-radius:4px;")
+        layout.addWidget(fb_label)
+
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        continue_btn = QPushButton("我已人工处理，继续")
+        stop_btn = QPushButton("暂停并关闭")
+        continue_btn.clicked.connect(self.accept)
+        stop_btn.clicked.connect(self.reject)
+        button_layout.addStretch()
+        button_layout.addWidget(continue_btn)
+        button_layout.addWidget(stop_btn)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def setup_sound_timer(self):
+        # 立即播放并每2分钟重复一次
+        self.play_system_sound()
+        self.sound_timer = QTimer()
+        self.sound_timer.timeout.connect(self.play_system_sound)
+        self.sound_timer.start(120000)
+
+    def play_system_sound(self):
+        try:
+            winsound.MessageBeep(-1)
+        except Exception:
+            try:
+                winsound.Beep(800, 300)
+            except Exception:
+                pass
+
+    def accept(self):
+        if hasattr(self, 'sound_timer'):
+            self.sound_timer.stop()
+        super().accept()
+
+    def reject(self):
+        if hasattr(self, 'sound_timer'):
+            self.sound_timer.stop()
+        super().reject()
+
+
 class SignalConnectionManager:
     def __init__(self):
         self.connections = []
 
-    def connect(self, signal, slot, connection_type=Qt.AutoConnection):
+    def connect(self, signal, slot, connection_type=None):
         """安全地连接信号，避免重复"""
+        # 检查是否已经存在相同的连接，避免重复添加
+        connection_key = (id(signal), id(slot))
+        if connection_key in [(id(s), id(sl)) for s, sl in self.connections]:
+            return  # 已存在，不重复连接
+        
         # 先尝试断开可能存在的连接
         try:
             signal.disconnect(slot)
@@ -99,25 +207,35 @@ class SignalConnectionManager:
             pass
 
         # 建立新连接
-        connection = signal.connect(slot, type=connection_type)
-        self.connections.append((signal, slot))
-        return connection
+        try:
+            signal.connect(slot)
+            self.connections.append((signal, slot))
+        except Exception as e:
+            print(f"[警告] 信号连接失败: {e}")
 
     def disconnect_all(self):
         """断开所有管理的连接"""
+        disconnected = 0
+        failed = 0
+        
         for signal, slot in self.connections:
             try:
                 signal.disconnect(slot)
+                disconnected += 1
             except (TypeError, RuntimeError):
-                pass
+                failed += 1
+        
         self.connections.clear()
+        
+        if failed > 0:
+            print(f"[信号管理] 成功断开 {disconnected} 个连接，{failed} 个连接断开失败（可能已断开）")
 
 class Application:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.config_manager = ConfigManager()
         self.api_service = ApiService(self.config_manager)
-        self.worker = AutoThread(self.api_service)
+        self.worker = GradingThread(self.api_service)
         self.main_window = MainWindow(self.config_manager, self.api_service, self.worker)
         self.signal_manager = SignalConnectionManager()
 
@@ -159,12 +277,16 @@ class Application:
                 print(f"写入全局异常日志失败: {e}")
 
             # 显示一个简单的错误对话框
-            dialog = SimpleNotificationDialog(
-                title="严重错误",
-                message=f"发生了一个意外的严重错误，应用程序可能需要关闭。\n\n错误: {exc_value}",
-                sound_type='error'
-            )
-            dialog.exec_()
+            try:
+                dialog = SimpleNotificationDialog(
+                    title="严重错误",
+                    message=f"发生了一个意外的严重错误，应用程序可能需要关闭。\n\n错误: {exc_value}",
+                    sound_type='error'
+                )
+                dialog.exec_()
+            except Exception:
+                # 如果对话框创建失败，至少打印错误信息
+                print(f"严重错误: {exc_value}")
 
         sys.excepthook = handle_exception
 
@@ -222,7 +344,7 @@ class Application:
             )
 
             # 任务因错误中断
-            if hasattr(self.worker, 'error_signal'): # 确保 AutoThread 有 error_signal
+            if hasattr(self.worker, 'error_signal'): # 确保 GradingThread 有 error_signal
                 self.signal_manager.connect(
                     self.worker.error_signal,
                     self.show_error_notification # 这个方法内部需要调用 main_window.on_worker_error
@@ -233,6 +355,13 @@ class Application:
                 self.signal_manager.connect(
                     self.worker.threshold_exceeded_signal,
                     self.show_threshold_exceeded_notification # 这个方法内部需要调用 main_window.on_worker_error
+                )
+
+            # 人工介入信号：当AI或OCR明确请求人工复核时触发
+            if hasattr(self.worker, 'manual_intervention_signal'):
+                self.signal_manager.connect(
+                    self.worker.manual_intervention_signal,
+                    self.show_manual_intervention_notification
                 )
 
 
@@ -293,6 +422,30 @@ class Application:
             parent=self.main_window
         )
         dialog.exec_()
+
+    def show_manual_intervention_notification(self, message, raw_feedback):
+        """当工作线程请求人工介入时调用，展示更明显的模态对话框并播放提示音。"""
+        specific_error_message = f"需要人工介入: {message}"
+        if hasattr(self.main_window, 'on_worker_error'):
+            self.main_window.on_worker_error(specific_error_message)
+        else:
+            if self.main_window.isMinimized(): self.main_window.showNormal(); self.main_window.activateWindow()
+            if hasattr(self.main_window, 'update_ui_state'): self.main_window.update_ui_state(is_running=False)
+
+        # 显示模态对话框，提供“继续”或“暂停并关闭”选项
+        dialog = ManualInterventionDialog(
+            title="人工介入 - 需要人工核查",
+            message=(f"检测到需要人工核查的情况：{message}\n\n请人工检查对应答题图片/OCR文本并处理。"),
+            raw_feedback=raw_feedback,
+            sound_type='error',
+            parent=self.main_window
+        )
+        result = dialog.exec_()
+        if result == QDialog.Accepted:
+            # 用户选择继续：提醒用户手动重启自动阅卷（不自动重启）
+            self.main_window.log_message("用户确认已人工处理，若要继续，请手动重新启动自动阅卷。")
+        else:
+            self.main_window.log_message("用户选择暂停并手动处理当前项。请在处理完成后手动重启阅卷。")
 
     def load_config(self):
         """加载配置并设置到主窗口"""
@@ -490,6 +643,9 @@ class Application:
         - 设置列宽和格式，便于在Excel中查看。
         - 简化错误处理，直接缓存无法写入的记录。
         """
+        # Prevent potential 'possibly unbound' references in except/ finally blocks by initializing variables
+        excel_filepath = None
+        excel_filename = ""
         try:
             # 记录汇总信息
             if record_data.get('record_type') == 'summary':
@@ -518,33 +674,48 @@ class Application:
             rows_to_write = []
 
             if is_dual:
-                headers.extend(["API标识", "分差阈值", "学生答案摘要", "AI分项得分", "AI原始回复", "AI原始总分", "双评分差", "最终得分"])
+                headers.extend(["API标识", "分差阈值", "学生答案摘要", "AI分项得分", "AI原始回复", "AI原始总分", "双评分差", "最终得分", "OCR识别原文", "OCR置信度", "评分细则(前50字)"])
 
-                row1 = [timestamp_str, question_index_str, "API-1",
+                ocr_text_str = record_data.get('ocr_recognized_text', '未启用OCR或识别失败')
+                ocr_conf_str = record_data.get('ocr_avg_confidence', '未启用OCR')
+                rubric_str = record_data.get('scoring_rubric_summary', '未配置')
+                
+                row1 = [question_index_str,
+                       "API-1",
                        str(record_data.get('score_diff_threshold', "未提供")),
                        record_data.get('api1_scoring_basis', '未提供'),
                        str(record_data.get('api1_itemized_scores', [])),
                        record_data.get('api1_raw_response', '未提供'),
                        str(record_data.get('api1_raw_score', 0.0)),
                        f"{record_data.get('score_difference', 0.0):.2f}",
-                       final_total_score_str]
-                row2 = [timestamp_str, question_index_str, "API-2",
+                       final_total_score_str,
+                       ocr_text_str,
+                       ocr_conf_str,
+                       rubric_str]
+                row2 = [question_index_str,
+                       "API-2",
                        str(record_data.get('score_diff_threshold', "未提供")),
                        record_data.get('api2_scoring_basis', '未提供'),
                        str(record_data.get('api2_itemized_scores', [])),
                        record_data.get('api2_raw_response', '未提供'),
                        str(record_data.get('api2_raw_score', 0.0)),
                        f"{record_data.get('score_difference', 0.0):.2f}",
-                       final_total_score_str]
+                       final_total_score_str,
+                       ocr_text_str,
+                       ocr_conf_str,
+                       rubric_str]
                 rows_to_write.extend([row1, row2])
             else: # 单评模式
-                headers.extend(["学生答案摘要", "AI分项得分", "AI原始回复", "最终得分"])
+                headers.extend(["学生答案摘要", "AI分项得分", "AI原始回复", "最终得分", "OCR识别原文", "OCR置信度", "评分细则(前50字)"])
 
-                single_row = [timestamp_str, question_index_str,
+                single_row = [question_index_str,
                              record_data.get('reasoning_basis', '无法提取'),
                              str(record_data.get('sub_scores', '未提供')),
                              record_data.get('raw_ai_response', '无法提取'),
-                             final_total_score_str]
+                             final_total_score_str,
+                             record_data.get('ocr_recognized_text', '未启用OCR或识别失败'),
+                             record_data.get('ocr_avg_confidence', '未启用OCR'),
+                             record_data.get('scoring_rubric_summary', '未配置')]
                 rows_to_write.append(single_row)
 
             # --- 3. 写入Excel文件 ---
@@ -570,17 +741,18 @@ class Application:
 
                 # 设置列宽
                 column_widths = {
-                    'A': 15,  # 时间
-                    'B': 10,  # 题目编号
-                    'C': 10,  # API标识
-                    'D': 10,  # 分差阈值
-                    'E': 80,  # 学生答案摘要（增加宽度以容纳较长的AI回答）
-                    'F': 100, # 评分依据（增加宽度以容纳详细的评分理由）
-                    'G': 20,  # AI分项得分
-                    'H': 15,  # AI原始总分/最终得分
-                    'I': 12,  # 双评分差
-                    'J': 12,  # 最终得分
-                    'K': 200  # AI原始回复（增加宽度以容纳完整的JSON回复）
+                    'A': 10,  # 题目编号
+                    'B': 10,  # API标识 / 学生答案摘要
+                    'C': 10,  # 分差阈值 / AI分项得分
+                    'D': 80,  # 学生答案摘要（增加宽度以容纳较长的AI回答）
+                    'E': 20,  # AI分项得分
+                    'F': 200, # AI原始回复（增加宽度以容纳完整的JSON回复）
+                    'G': 15,  # AI原始总分/最终得分
+                    'H': 12,  # 双评分差
+                    'I': 12,  # 最终得分
+                    'J': 150, # OCR识别原文
+                    'K': 12,  # OCR置信度
+                    'L': 50   # 评分细则(前50字)
                 }
 
                 for col, width in column_widths.items():

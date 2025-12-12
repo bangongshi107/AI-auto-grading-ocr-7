@@ -35,7 +35,7 @@
    </font>
   </property>
   <property name="windowTitle">
-   <string>科技改变世界 - 本软件仅能使用视觉（多模态）大模型，AI仅直接评阅答题卡截图</string>
+   <string>科技改变世界 </string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <property name="sizePolicy">
@@ -98,8 +98,8 @@
        </property>
        <property name="geometry">
         <rect>
-         <x>0</x>
-         <y>0</y>
+         <x>19</x>
+         <y>12</y>
          <width>760</width>
          <height>945</height>
         </rect>
@@ -111,6 +111,9 @@
         </sizepolicy>
        </property>
        <layout class="QVBoxLayout" name="verticalLayout">
+        <property name="spacing">
+         <number>0</number>
+        </property>
         <property name="leftMargin">
          <number>0</number>
         </property>
@@ -121,9 +124,6 @@
          <number>0</number>
         </property>
         <property name="bottomMargin">
-         <number>0</number>
-        </property>
-        <property name="spacing">
          <number>0</number>
         </property>
         <item>
@@ -163,11 +163,11 @@
             <property name="currentIndex">
              <number>0</number>
             </property>
-<item>
- <property name="text">
-  <string>火山引擎 (推荐)</string>
- </property>
-</item>
+            <item>
+             <property name="text">
+              <string>火山引擎 (推荐)</string>
+             </property>
+            </item>
             <item>
              <property name="text">
               <string>月之暗面</string>
@@ -178,11 +178,6 @@
               <string>智谱清言</string>
              </property>
             </item>
-            <!-- <item>
-             <property name="text">
-              <string>deepseek</string>
-             </property>
-            </item> -->
             <item>
              <property name="text">
               <string>阿里通义千问</string>
@@ -250,7 +245,7 @@
          </layout>
         </item>
         <item>
-         <layout class="QHBoxLayout" name="horizontalLayout_4">
+         <layout class="QHBoxLayout" name="horizontalLayout_ocr">
           <property name="leftMargin">
            <number>0</number>
           </property>
@@ -264,7 +259,7 @@
            <number>0</number>
           </property>
           <item>
-           <widget class="QComboBox" name="second_api_url">
+           <widget class="QComboBox" name="ocr_mode">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
               <horstretch>0</horstretch>
@@ -273,67 +268,27 @@
             </property>
             <property name="maximumSize">
              <size>
-              <width>170</width>
+              <width>300</width>
               <height>16777215</height>
              </size>
             </property>
             <property name="currentIndex">
              <number>0</number>
             </property>
-<item>
- <property name="text">
-  <string>火山引擎 (推荐)</string>
- </property>
-</item>
             <item>
              <property name="text">
-              <string>月之暗面</string>
+              <string>纯AI识图阅卷</string>
              </property>
             </item>
             <item>
              <property name="text">
-              <string>智谱清言</string>
-             </property>
-            </item>
-            <!-- <item>
-             <property name="text">
-              <string>deepseek</string>
-             </property>
-            </item> -->
-            <item>
-             <property name="text">
-              <string>阿里通义千问</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>百度文心千帆</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>腾讯混元</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>OpenRouter</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>OpenAI</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Google Gemini</string>
+              <string>百度智能云OCR文字识别+AI评阅</string>
              </property>
             </item>
            </widget>
           </item>
           <item>
-           <widget class="QLineEdit" name="second_api_key">
+           <widget class="QLineEdit" name="baidu_ocr_api_key">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
               <horstretch>0</horstretch>
@@ -341,12 +296,12 @@
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>API密钥/Access Token</string>
+             <string>OCR API Key</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QLineEdit" name="second_modelID">
+           <widget class="QLineEdit" name="baidu_ocr_secret_key">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
               <horstretch>0</horstretch>
@@ -354,8 +309,58 @@
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>AI视觉模型/ID（此AI仅双评启用）</string>
+             <string>OCR Secret Key</string>
             </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_ocr_quality">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>  文字识别精度:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="ocr_quality_level">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>80</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>控制OCR文字识别的严格程度（仅OCR模式有效）</string>
+            </property>
+            <property name="currentIndex">
+             <number>1</number>
+            </property>
+            <item>
+             <property name="text">
+              <string>宽松</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>适度</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>严格</string>
+             </property>
+            </item>
            </widget>
           </item>
          </layout>
@@ -436,6 +441,112 @@
          </layout>
         </item>
         <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_4">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QComboBox" name="second_api_url">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>170</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="currentIndex">
+             <number>0</number>
+            </property>
+            <item>
+             <property name="text">
+              <string>火山引擎 (推荐)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>月之暗面</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>智谱清言</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>阿里通义千问</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>百度文心千帆</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>腾讯混元</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>OpenRouter</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>OpenAI</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Google Gemini</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="second_api_key">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="placeholderText">
+             <string>API密钥/Access Token</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="second_modelID">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="placeholderText">
+             <string>AI视觉模型/ID（此AI仅双评启用）</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
          <layout class="QHBoxLayout" name="horizontalLayout_title1">
           <property name="leftMargin">
            <number>0</number>
@@ -473,16 +584,48 @@
            </widget>
           </item>
           <item>
-           <widget class="QLabel" name="label_3">
+           <widget class="QLabel" name="label_score_step">
             <property name="sizePolicy">
-             <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
               <horstretch>0</horstretch>
-              <verstretch>5</verstretch>
+              <verstretch>0</verstretch>
              </sizepolicy>
             </property>
             <property name="text">
-             <string>--------------------------------评分细则---------------------------------</string>
+             <string>  步长:</string>
             </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="score_rounding_step">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>60</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>控制最终提交分数的精度（支持0.5或1.0步长，例如7.3按0.5步长=7.5）</string>
+            </property>
+            <property name="currentIndex">
+             <number>0</number>
+            </property>
+            <item>
+             <property name="text">
+              <string>0.5</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>1</string>
+             </property>
+            </item>
            </widget>
           </item>
          </layout>
