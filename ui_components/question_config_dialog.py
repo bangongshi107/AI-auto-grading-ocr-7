@@ -360,6 +360,17 @@ class QuestionConfigDialog(QDialog):
             }}
         """)
 
+    def _compact_layout(self, layout, spacing: int = 4, margins: tuple = (6, 4, 6, 4)) -> None:
+        """Apply compact spacing and margins to a QLayout."""
+        try:
+            layout.setSpacing(spacing)
+        except Exception:
+            pass
+        try:
+            layout.setContentsMargins(*margins)
+        except Exception:
+            pass
+
     def _log_message(self, message: str, is_error: bool = False) -> None:
         """Helper method to safely log messages to parent window"""
         if self.parent_window and hasattr(self.parent_window, 'log_message'):
@@ -381,13 +392,16 @@ class QuestionConfigDialog(QDialog):
         
         # 主布局
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(0) # 设置主布局中各组件的垂直间距为0像素
+        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(8, 6, 8, 6)
+        self._compact_layout(main_layout, spacing=4, margins=(6, 4, 6, 4))
         
         # --- 1. 分数设置组 ---
-        score_group = QGroupBox("设置此题给分上下限。注意，可以不是满分零分")
+        score_group = QGroupBox("")
         score_group_content_layout = QHBoxLayout() 
+        self._compact_layout(score_group_content_layout)
         
-        score_group_content_layout.addWidget(QLabel("打分上限:"))
+        score_group_content_layout.addWidget(QLabel("给分上限:"))
         self.max_score_edit = QSpinBox()
         self.max_score_edit.setMinimum(0)
         self.max_score_edit.setMaximum(150)
@@ -395,7 +409,7 @@ class QuestionConfigDialog(QDialog):
         score_group_content_layout.addWidget(self.max_score_edit)
         score_group_content_layout.addSpacing(50) # 添加伸缩空间
         
-        score_group_content_layout.addWidget(QLabel("打分下限："))
+        score_group_content_layout.addWidget(QLabel("给分下限："))
         self.min_score_edit = QSpinBox()
         self.min_score_edit.setMinimum(0)
         self.min_score_edit.setMaximum(150)
@@ -406,8 +420,9 @@ class QuestionConfigDialog(QDialog):
         main_layout.addWidget(score_group)
 
         # --- 新增：题目类型选择 ---
-        question_type_group = QGroupBox("选择题目类型（重要）") # 可以给它一个组标题
+        question_type_group = QGroupBox("") # 可以给它一个组标题
         question_type_layout = QHBoxLayout()
+        self._compact_layout(question_type_layout)
 
         self.question_type_combo = QComboBox()
         # 定义题目类型选项 (键: 内部标识符, 值: UI显示文本)
@@ -453,8 +468,9 @@ class QuestionConfigDialog(QDialog):
         if self.question_index == 1:
             three_step_group = QGroupBox("")
             three_step_group_main_layout = QVBoxLayout() 
+            self._compact_layout(three_step_group_main_layout)
 
-            self.three_step_scoring_checkbox = QCheckBox("60'作文专用 最终得分分3份输入3个位置 (仅第一题可用）")
+            self.three_step_scoring_checkbox = QCheckBox("60'作文专用，分数分3份输入3个位置 (仅当第一题可用）")
             enable_three_step_from_config = self.question_config.get('enable_three_step_scoring', False)
             self.three_step_scoring_checkbox.setChecked(enable_three_step_from_config)
 
@@ -507,6 +523,7 @@ class QuestionConfigDialog(QDialog):
         # --- 4. 提交按钮位置设置 ---
         submit_group = QGroupBox("")
         submit_group_content_layout = QHBoxLayout() 
+        self._compact_layout(submit_group_content_layout)
         
         submit_group_content_layout.addWidget(QLabel("坐标:"))
         submit_group_content_layout.addWidget(QLabel("X:"))
@@ -531,6 +548,7 @@ class QuestionConfigDialog(QDialog):
         # --- 5. 翻页按钮配置 ---
         next_group = QGroupBox("")
         next_group_main_layout = QVBoxLayout() 
+        self._compact_layout(next_group_main_layout)
         
         self.enable_next_check = QCheckBox("启用翻页按钮")
         enable_next_button_for_current_q = self.question_config.get('enable_next_button', False) if self.question_config else False
@@ -539,6 +557,7 @@ class QuestionConfigDialog(QDialog):
         next_group_main_layout.addWidget(self.enable_next_check) 
         
         next_coord_and_button_layout = QHBoxLayout() 
+        self._compact_layout(next_coord_and_button_layout)
         next_coord_and_button_layout.addWidget(QLabel("坐标:"))
         next_coord_and_button_layout.addWidget(QLabel("X:"))
         self.next_x_edit = QLineEdit()
@@ -565,6 +584,7 @@ class QuestionConfigDialog(QDialog):
         # --- 6. 答案区域配置 (恢复到旧版对称布局) ---
         answer_group = QGroupBox("") # 确保 answer_group 已定义
         answer_group_main_layout = QVBoxLayout()
+        self._compact_layout(answer_group_main_layout)
 
         # 先获取 answer_area，如果为 None 则使用空字典作为后备
         answer_area_config = self.question_config.get('answer_area') if self.question_config else None
@@ -573,6 +593,7 @@ class QuestionConfigDialog(QDialog):
 
         # 左上角坐标行
         answer_coord_layout_tl = QHBoxLayout() 
+        self._compact_layout(answer_coord_layout_tl)
         answer_coord_layout_tl.addWidget(QLabel("左上角 X:"))
         self.answer_x1_edit = QLineEdit()
         answer_x1 = answer_area_config.get('x1', 0) # 直接从 answer_area_config 获取
@@ -588,6 +609,7 @@ class QuestionConfigDialog(QDialog):
         
         # 右下角坐标行
         answer_coord_layout_br = QHBoxLayout() 
+        self._compact_layout(answer_coord_layout_br)
         answer_coord_layout_br.addWidget(QLabel("右下角 X:"))
         self.answer_x2_edit = QLineEdit()
         answer_x2 = answer_area_config.get('x2', 0)
@@ -603,6 +625,7 @@ class QuestionConfigDialog(QDialog):
 
         # 按钮占据可用水平空间 (这部分不变)
         answer_button_layout = QHBoxLayout()
+        self._compact_layout(answer_button_layout)
         self.set_answer_button = QPushButton("框定答案区域")
         self.set_answer_button.clicked.connect(self.start_answer_area_selection)
         answer_button_layout.addWidget(self.set_answer_button)
@@ -613,6 +636,7 @@ class QuestionConfigDialog(QDialog):
         
         # --- 7. 按钮区域 (Save, Cancel) ---
         button_layout = QHBoxLayout()
+        self._compact_layout(button_layout)
         save_button = QPushButton("保存")
         save_button.clicked.connect(self.save_config)
         cancel_button = QPushButton("取消")
@@ -635,6 +659,11 @@ class QuestionConfigDialog(QDialog):
         # 创建UI组件
         group_box = QGroupBox("")  # 组的标题由外部QLabel提供，保持UI一致性
         layout = QHBoxLayout()
+        # 更紧凑的布局间距与外边距
+        try:
+            self._compact_layout(layout)
+        except Exception:
+            pass
         
         x_edit = QLineEdit()
         y_edit = QLineEdit()
