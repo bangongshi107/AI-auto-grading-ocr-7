@@ -122,7 +122,7 @@ class GradingThread(QThread):
         self._state_lock = Lock()   # 保护completion_status等状态变量
         self._temp_resources = []   # 追踪临时资源（图片对象等）以便清理
 
-    def _get_common_system_message(self, ocr_mode=False):
+    def _get_common_system_message(self, ocr_mode: bool = False) -> str:
         """
         返回通用的AI系统提示词。
         
@@ -146,159 +146,175 @@ class GradingThread(QThread):
         if subject_from_config and isinstance(subject_from_config, str) and subject_from_config.strip():
             subject = subject_from_config.strip()
         
+        # ==========================
+        # Prompt安全协议（全题型通用）
+        # ==========================
+        # 说明：系统会根据模型输出内容的关键词触发“人工介入停机”。
+        # 为减少误停：要求模型在【非人工介入】时避免使用这些触发词。
+        wording_blacklist = (
+            "【用词禁区 + 触发协议】\n"
+            "- 除非你决定触发人工介入，否则禁止在 student_answer_summary 与 scoring_basis 中出现任何以下词/短语（包含同义改写与英文）：\n"
+            "  需人工介入、人工介入、需人工复核、人工复核、无法、无法判断、无法评分、乱码、识别失败、识别错误、噪声太大、涂改、改错、unclear、cannot、manual intervention。\n"
+            "- 一旦你认为需要人工介入：必须让 student_answer_summary 以固定前缀开头：\"需人工介入: \"，并把 itemized_scores 按规则置零。\n"
+        )
+
+        json_compliance = (
+            "【严格JSON合规】\n"
+            "- 只输出一个JSON对象：首字符必须是 { ，末字符必须是 }。\n"
+            "- 不要输出代码块标记，不要输出任何解释性文字。\n"
+            "- JSON键必须使用双引号；标点必须使用英文半角；itemized_scores 只能包含数字（int/float），不得包含字符串、null、NaN、Infinity。\n"
+        )
+
+        evidence_bar = (
+            "【证据门槛（禁止合理推断给分）】\n"
+            "- 只有在学生答案中能找到可定位的文字/符号/算式等【直接证据】时，才允许给该得分点记分。\n"
+            "- 若某一得分点需要给分但证据不足（例如内容残缺、歧义过大、关键符号不清），请触发人工介入（宁停勿错），不要基于常识补全或推断。\n"
+            "- scoring_basis 必须逐点给出“证据摘录”并明确对应关系，推荐句式：\n"
+            "  第1点 | 得分点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: x\n"
+            "  （证据摘录必须来自学生答案的原文片段，保持简短可核对）\n"
+        )
+
+        penalty_rules = (
+            "【扣分/扣点条款处理规则】\n"
+            "- 如果评分细则包含扣分条款（例如“错别字每处扣1分，最多扣3分”）：先按采分点给分，再按条款扣分。\n"
+            "- 只有当扣分条款的对象、每次扣分量、上限/范围在细则中写得明确，且你能在学生答案中找到明确的扣分证据时，才执行扣分。\n"
+            "- 若扣分条款存在但关键要素不明确或证据不足，请触发人工介入（宁停勿错），不要自行猜测扣分口径。\n"
+        )
+
         if ocr_mode:
-            # OCR纯文本模式 - 独立完整的提示词
+            # OCR纯文本模式
             return (
-                f"你是一位经验丰富、严谨细致的【{subject}】资深阅卷老师。"
-                "你的核心任务是：根据【评分细则】和【题目类型说明】，对OCR识别的学生答案文本进行准确评分。"
-                "请严格按照给定的JSON格式输出分析结果。\n\n"
-                "【重要】你当前处于OCR纯文本评分模式，只能使用系统提供的OCR识别文本进行评分。\n\n"
-                "在整个评分过程中，请严格遵守以下【评分总则】：\n"
-                "1.  【严格依据细则】：你的所有评分判断【必须且仅能严格依据】【评分细则】中明确列出的每一个【得分点/答案要点/关键步骤/评估维度】（具体称呼依据题目类型而定）的标准和给分说明。严禁对评分细则进行任何形式的补充、推测、联想或超出细则范围进行给分或不给分。\n"
-                "2.  【仅限文本内容】：你的评分判断【仅能依据】OCR识别的文本内容。严禁根据文本以外的任何信息（包括你对该学科知识的掌握、对评分细则的记忆或普遍常识）来猜测、臆断或虚构学生可能想表达的答案。\n"
-                "3.  【关于扣分】：评分主要依据学生达到得分点的程度给分。**然而，如果【评分细则】中明确包含\"扣X分\"的指令（例如：'每处过度解读扣0.5分'，'关键词误译扣2分'等），你必须严格执行这些扣分指令。** 请在`scoring_basis`的\"判断与理由\"中清晰说明扣分的原因和依据，并在最终的`得分`或`itemized_scores`中体现扣分后的结果。\n"
-                "4.  【错误处理】：若遇到以下任何情况，请立即报错并停止评分：\n"
-                "    - 文本中出现明显的自我矛盾或修正痕迹（例如'选A，不对，应该选B'），请报错：【报错】文本存在自我矛盾，需人工介入\n"
-                "    - OCR文本中包含大量噪声符号导致无法理解学生答案，请报错：【报错】文本噪声过多，需人工介入\n"
-                "    - OCR文本逻辑明显不通（例如算式不成立、步骤跳跃严重），请报错：【报错】文本逻辑异常，需人工介入\n"
-                "    - 遇到任何其他不确定情况，优先报错而非猜测。\n\n"
-                "【特殊情况处理】：\n若OCR文本为空或完全无法理解，请按以下规则填充JSON：\n"
-                "    - `student_answer_summary`: 明确注明具体情况，例如：\"OCR未识别到有效文本。\"，\"文本内容与题目要求完全无关。\"\n"
-                "    - `scoring_basis`: 简要说明此判断的依据，例如：\"OCR文本为空。\"，\"文本内容不符合题目要求。\"\n"
-                "    - `itemized_scores`:\n"
-                "        - 对于按【得分点/答案要点/关键步骤】给分的题型，应输出一个与【评分细则】中预设的相应条目数量相同长度的全零列表（例如，若细则有3个得分点，则输出 `[0, 0, 0]`）。\n"
-                "        - 对于整体评估的开放题型，应输出 `[0]`。\n"
+                f"你是一位经验丰富、严谨细致的【{subject}】资深阅卷老师。\n"
+                "你的任务：依据【评分细则】与【题目类型说明】，对系统提供的OCR识别文本进行评分。\n"
+                "【重要】当前为OCR纯文本评分：只能依据OCR文本，不得要求提供图片，不得基于常识补全缺失内容。\n\n"
+                "【宁停勿错】当出现任一关键不确定点（内容残缺、歧义过大、关键符号/步骤不清等），请触发人工介入。\n"
+                "- 仍然输出可解析JSON（不输出额外文字）。\n"
+                "- student_answer_summary 以 \"需人工介入: \" 开头写明原因。\n"
+                "- itemized_scores 输出全0（长度优先与采分点数一致；若无法确定长度输出 [0]）。\n\n"
+                "【评分总则】\n"
+                "1) 严格依据细则：只按细则列出的得分点/步骤/维度给分，不得补充采分点。\n"
+                "2) 只看文本证据：只依据OCR文本中出现的证据给分，禁止推断。\n"
+                + wording_blacklist
+                + evidence_bar
+                + penalty_rules
+                + json_compliance
             )
         else:
-            # 纯AI视觉模式 - 独立完整的提示词
+            # 纯AI视觉模式
             return (
-                f"你是一位经验丰富、严谨细致的【{subject}】资深阅卷老师。"
-                "你的核心任务是：根据【评分细则】和【题目类型说明】，对学生答案的图片内容进行深入分析和准确评分。"
-                "请严格按照给定的JSON格式输出分析结果。\n\n"
-                "在整个评分过程中，请严格遵守以下【评分总则】：\n"
-                "1.  【关于涂改】：学生在答案文字上所作的横线、斜线、删除线等涂改标记，均视为学生主动删除的内容，此部分不参与评分。"
-                "学生在涂改后通常会在旁边、上方或下方补写新答案。涂改标记（如删除线）作废原内容，未被涂改标记覆盖的文字视为有效答案。"
-                "若补充内容清晰可辨且与题目相关，应将其视为学生最终答案并纳入评分范围。\n"
-                "2.  【严格依据细则】：你的所有评分判断【必须且仅能严格依据】【评分细则】中明确列出的每一个【得分点/答案要点/关键步骤/评估维度】（具体称呼依据题目类型而定）的标准和给分说明。严禁对评分细则进行任何形式的补充、推测、联想或超出细则范围进行给分或不给分。\n"
-                "3.  【仅限图像内容】：你的评分判断【仅能依据】从学生答题卡图片中真实可辨识的手写内容。严禁根据图片以外的任何信息（包括你对该学科知识的掌握、对评分细则的记忆或普遍常识）来猜测、臆断或虚构学生可能想表达的答案。\n"
-                "4.  【关于扣分】：评分主要依据学生达到得分点的程度给分。**然而，如果【评分细则】中明确包含\"扣X分\"的指令（例如：'每处过度解读扣0.5分'，'关键词误译扣2分'等），你必须严格执行这些扣分指令。** 请在`scoring_basis`的\"判断与理由\"中清晰说明扣分的原因和依据，并在最终的`得分`或`itemized_scores`中体现扣分后的结果。\n\n"
-                "【特殊情况处理】：\n若学生答案图片完全空白、字迹完全无法辨认，或所写内容与题目要求完全无关，请按以下规则填充JSON：\n"
-                "    - `student_answer_summary`: 明确注明具体情况，例如：\"学生未作答。\"，\"图片内容完全无法识别，字迹模糊不清。\"，\"学生答案内容与题目要求完全不符。\"\n"
-                "    - `scoring_basis`: 简要说明此判断的依据，例如：\"答题区域空白，无任何作答痕迹。\"\n"
-                "    - `itemized_scores`:\n"
-                "        - 对于按【得分点/答案要点/关键步骤】给分的题型，应输出一个与【评分细则】中预设的相应条目数量相同长度的全零列表（例如，若细则有3个得分点，则输出 `[0, 0, 0]`）。\n"
-                "        - 对于整体评估的开放题型，应输出 `[0]`。\n"
-                "    - `recognition_confidence`: {\"score\": \"1\", \"reason\": \"[对应上述特殊情况的理由，例如：图片空白或字迹完全无法识别。]\"}\n"
+                f"你是一位经验丰富、严谨细致的【{subject}】资深阅卷老师。\n"
+                "你的任务：依据【评分细则】与【题目类型说明】，对学生答案图片中可清晰辨认的手写内容进行评分。\n\n"
+                "【宁停勿错】当出现任一关键不确定点（字迹/符号含义不清、最终答案难以确认、关键步骤不清等），请触发人工介入。\n"
+                "- 仍然输出可解析JSON（不输出额外文字）。\n"
+                "- student_answer_summary 以 \"需人工介入: \" 开头写明原因。\n"
+                "- itemized_scores 输出全0（长度优先与采分点数一致；若无法确定长度输出 [0]）。\n\n"
+                "【评分总则】\n"
+                "1) 对划掉/删除线明确作废的内容不计分；只对最终可辨认内容评分。\n"
+                "2) 严格依据细则：只按细则列出的得分点/步骤/维度给分，不得补充采分点。\n"
+                "3) 只看图像证据：只依据图片中能直接辨认的证据给分，禁止推断。\n"
+                + wording_blacklist
+                + evidence_bar
+                + penalty_rules
+                + json_compliance
             )
 
 
-    def _build_objective_fillintheblank_prompt(self, standard_answer_rubric, ocr_mode=False):
-        prompt_json = {
-          "system_message": self._get_common_system_message(),
-          "user_task": {
-            "task_description": "请分析以下学生答案图片（客观填空题），并根据下方提供的评分细则给出评分。",
-            "question_type_specific_instructions": "【题目类型：客观填空题】\n请仔细阅读【评分细则】中对【每一个填空项/答案要点】的具体标准答案、允许的表达方式及对应的分值。\n你的核心任务是判断学生对每个【填空项/答案要点】的回答是否符合细则要求。请严格遵照【评分细则】中关于答案细节（例如：格式、准确性等）的具体规定进行给分。若【评分细则】中包含灵活给分说明（如“意思对即可”），请在评分依据中体现你的理解。",
-            "scoring_rubric_placeholder": standard_answer_rubric,
-            "student_answer_image_placeholder": "（图片内容会通过API的其他方式传入，这里仅为逻辑占位）",
-            "student_answer_text_placeholder": "（OCR文本会通过API的其他方式传入，此字段仅为逻辑占位）",
-            "output_format_specification": {
-              "description": "请严格按照以下JSON格式返回结果，不要包含任何额外的解释性文字在JSON结构之外。确保输出的是有效的JSON，不要添加任何前缀、后缀、代码块标记或自然语言描述。直接输出JSON对象。",
-              "format": {
-                "student_answer_summary": "【请在此处对图片中的学生手写答案进行**中立、客观、不带任何主观判断**的【核心内容概括】（例如：“学生答案的主要内容为[...]，表述清晰。”或“学生填写了[...]，部分内容无法识别。”）",
-                "scoring_basis": (
-                    """
-【请针对【评分细则】中的【每一个填空项/答案要点】，清晰地解释你是如何判断该填空项/答案要点的是否得分以及得了多少分的。你需要：
-1. 引用或概括学生在对应填空项/答案要点上的作答内容（如果未作答请说明）。
-2. 结合评分细则，说明你的评分判断和理由。请用自然语言描述匹配过程。例如：'学生提到了[...]，匹配细则中的得分点[...]，得2分。
-3. 明确指出该填空项/答案要点你最终给了多少分。
-请确保你的解释能够清晰地支撑你在 `itemized_scores` 字段中给出的对应分数。
-"""
-                ),
-                "itemized_scores": "【一个数字列表，例如 `[2, 0, 1]`。列表中的每个数字代表学生在【评分细则】中【对应顺序的每一个填空项/答案要点】上获得的【实际得分】。列表的长度应与评分细则中填空项/答案要点的数量一致。】"
-              }
-            }
-          }
-        }
-        if ocr_mode:
-            prompt_json['system_message'] = self._get_common_system_message(ocr_mode=True)
-            prompt_json['user_task']['student_answer_image_placeholder'] = ""
-        return json.dumps(prompt_json, ensure_ascii=False, indent=2)
+    def _build_objective_fillintheblank_prompt(self, standard_answer_rubric: str, ocr_mode: bool = False):
+        system_message = self._get_common_system_message(ocr_mode=ocr_mode)
+        user_prompt = (
+            "任务：客观填空题阅卷。\n\n"
+            "【题目类型说明：客观填空题】\n"
+            "- 严格对照评分细则中的每一个填空项/答案要点判断是否得分。\n"
+            "- 若细则允许‘意思对即可/酌情给分’，必须在 scoring_basis 里用‘证据摘录’说明匹配依据。\n\n"
+            "【评分细则（原样）】\n"
+            f"{standard_answer_rubric.strip()}\n\n"
+            "【输出要求】\n"
+            "- 只输出一个JSON对象；字段必须包含：student_answer_summary, scoring_basis, itemized_scores。\n"
+            "- itemized_scores 为数字列表，长度应与填空项/要点数量一致；若无法可靠确定数量，请触发人工介入并输出 [0]。\n\n"
+            "【评分口径（证据门槛）】\n"
+            "- 对每个填空项：能在学生答案中找到直接证据才给分；证据不足则触发人工介入（宁停勿错）。\n\n"
+            "【scoring_basis写法（会被保存供用户查看）】\n"
+            "- 逐项列出：\n"
+            "  第1空 | 要点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: x\n"
+            "  第2空 | 要点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: y\n"
+        )
+        return {"system": system_message, "user": user_prompt}
 
-    def _build_subjective_pointbased_prompt(self, standard_answer_rubric, ocr_mode=False):
-        prompt_json = {
-          "system_message": self._get_common_system_message(),
-          "user_task": {
-            "task_description": "请分析以下学生答案图片（按点给分主观题），并根据下方提供的评分细则给出评分。",
-            "question_type_specific_instructions": "【题目类型：按点给分主观题】\n请仔细阅读【评分细则】中列出的【每一个得分点】及其对应的原始分值。\n你的核心任务是判断学生的答案内容是否清晰、准确地覆盖了这些【得分点】的要求。请严格按照细则中对每个【得分点】的描述和要求进行判断和给分。如果细则中包含“意思对即可”“酌情给分”或类似的灵活给分说明，请在评分依据中体现你的理解。",
-            "scoring_rubric_placeholder": standard_answer_rubric,
-            "student_answer_image_placeholder": "（图片内容会通过API的其他方式传入，这里仅为逻辑占位）",
-            "student_answer_text_placeholder": "（OCR文本会通过API的其他方式传入，此字段仅为逻辑占位）",
-            "output_format_specification": {
-              "description": "请严格按照以下JSON格式返回结果，不要包含任何额外的解释性文字在JSON结构之外。确保输出的是有效的JSON，不要添加任何前缀、后缀、代码块标记或自然语言描述。直接输出JSON对象。",
-              "format": {
-                "student_answer_summary": "【请在此处对图片中的学生手写答案进行**中立、客观、不带任何主观判断**的【核心内容概括】（例如：“学生答案的主要内容为[...]，表述清晰。”或“学生填写了[...]，部分内容无法识别。”）",
-                "scoring_basis": "【请针对【评分细则】中的【每一个得分点】，清晰地解释你是如何判断该得分点的是否得分以及得了多少分的。你需要：\n1. 引用或概括学生在对应得分点上的作答内容（如果未作答请说明）。\n2. 结合评分细则，说明你的评分判断和理由。\n3. 明确指出该得分点你最终给了多少分。\n请确保你的解释能够清晰地支撑你在 `itemized_scores` 字段中给出的对应分数。\n",
-                "itemized_scores": "【一个数字列表，例如 `[3, 1, 0, 2]`。列表中的每个数字代表学生在【评分细则】中【对应顺序的每一个得分点】上获得的【实际得分】。列表的长度应与评分细则中得分点的数量一致。】"
-              }
-            }
-          }
-        }
-        if ocr_mode:
-            prompt_json['system_message'] = self._get_common_system_message(ocr_mode=True)
-            prompt_json['user_task']['student_answer_image_placeholder'] = ""
-        return json.dumps(prompt_json, ensure_ascii=False, indent=2)
 
-    def _build_formula_proof_prompt(self, standard_answer_rubric, ocr_mode=False):
-        prompt_json = {
-          "system_message": self._get_common_system_message(),
-          "user_task": {
-            "task_description": "请分析以下学生答案图片（公式计算/证明题），并根据下方提供的评分细则给出评分。",
-            "question_type_specific_instructions": "【题目类型：公式计算/证明题】\n请仔细阅读【评分细则】中对【解题的每一个关键步骤/采分点、所用公式的准确性、计算结果的正确性、证明逻辑的严密性以及数学/物理/化学符号和书写的规范性】的具体要求和分值分配。\n你的核心任务是逐一核对学生的解题过程和最终答案是否符合细则中每一个【关键步骤/采分点】的标准。",
-            "scoring_rubric_placeholder": standard_answer_rubric,
-            "student_answer_image_placeholder": "（图片内容会通过API的其他方式传入，这里仅为逻辑占位）",
-            "student_answer_text_placeholder": "（OCR文本会通过API的其他方式传入，此字段仅为逻辑占位）",
-            "output_format_specification": {
-              "description": "请严格按照以下JSON格式返回结果，不要包含任何额外的解释性文字在JSON结构之外。确保输出的是有效的JSON，不要添加任何前缀、后缀、代码块标记或自然语言描述。直接输出JSON对象。",
-              "format": {
-                "student_answer_summary": "【请在此处对图片中的学生手写答案进行**中立、客观、不带任何主观判断**的【核心内容概括】（例如：“学生答案的主要内容为[...]，表述清晰。”或“学生填写了[...]，部分内容无法识别。”）",
-                "scoring_basis": "【请针对【评分细则】中的【每一个关键步骤/采分点】，清晰地解释你是如何判断该步骤/采分点的是否得分以及得了多少分的。你需要：\n1. 引用或概括学生在对应步骤/采分点上的解题过程或书写内容（如果未作答或跳过请说明）。\n2. 结合评分细则，说明你的评分判断和理由（例如：公式是否正确，代入是否无误，计算结果是否准确，证明逻辑是否严密等）。\n3. 明确指出该步骤/采分点你最终给了多少分。\n请确保你的解释能够清晰地支撑你在 `itemized_scores` 字段中给出的对应分数。\n",
-                "itemized_scores": "【一个数字列表，例如 `[2, 2, 0, 1]`。列表中的每个数字代表学生在【评分细则】中【对应顺序的每一个关键步骤/采分点】上获得的【实际得分】。列表的长度应与评分细则中关键步骤/采分点的数量一致。】"
-              }
-            }
-          }
-        }
-        if ocr_mode:
-            prompt_json['system_message'] = self._get_common_system_message(ocr_mode=True)
-            prompt_json['user_task']['student_answer_image_placeholder'] = ""
-        return json.dumps(prompt_json, ensure_ascii=False, indent=2)
+    def _build_subjective_pointbased_prompt(self, standard_answer_rubric: str, ocr_mode: bool = False):
+        system_message = self._get_common_system_message(ocr_mode=ocr_mode)
+        user_prompt = (
+            "任务：按点给分主观题阅卷。\n\n"
+            "【题目类型说明：按点给分主观题】\n"
+            "- 严格对照评分细则中的每一个得分点判断覆盖程度并给分。\n"
+            "- 若细则允许‘意思对即可/酌情给分’，必须在 scoring_basis 里用‘证据摘录’说明匹配依据；禁止凭印象补全。\n\n"
+            "【评分细则（原样）】\n"
+            f"{standard_answer_rubric.strip()}\n\n"
+            "【输出要求】\n"
+            "- 只输出一个JSON对象；字段必须包含：student_answer_summary, scoring_basis, itemized_scores。\n"
+            "- itemized_scores 为数字列表，长度应与得分点数量一致；若无法可靠确定数量，请触发人工介入并输出 [0]。\n\n"
+            "【评分口径（证据门槛）】\n"
+            "- 每个得分点：只有找得到直接证据才给分；证据不足则触发人工介入（宁停勿错）。\n\n"
+            "【scoring_basis写法（会被保存供用户查看）】\n"
+            "- 必须逐点列出：\n"
+            "  第1点 | 得分点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: x\n"
+            "  第2点 | 得分点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: y\n"
+        )
+        return {"system": system_message, "user": user_prompt}
 
-    def _build_holistic_evaluation_prompt(self, standard_answer_rubric, ocr_mode=False):
-        prompt_json = {
-          "system_message": self._get_common_system_message(),
-          "user_task": {
-            "task_description": "请分析以下学生答案图片（整体评估开放题，如作文、论述等），并根据下方提供的评分细则给出评分。",
-            "question_type_specific_instructions": "【题目类型：整体评估开放题】\n请仔细阅读【评分细则】中关于【各项评估维度/评分标准或等级描述】（例如：内容是否切题、思想深度、结构逻辑性、语言表达的准确性与文采、观点创新性、书写规范等）。\n你的核心任务是基于这些宏观标准，对学生的答案进行全面的、综合的判断，并给出一个最终总分。请在评分依据中清晰阐述你是如何结合细则中的各个评估维度得出该总分的。",
-            "scoring_rubric_placeholder": standard_answer_rubric,
-            "student_answer_image_placeholder": "（图片内容会通过API的其他方式传入，这里仅为逻辑占位）",
-            "student_answer_text_placeholder": "（OCR文本会通过API的其他方式传入，此字段仅为逻辑占位）",
-            "output_format_specification": {
-              "description": "请严格按照以下JSON格式返回结果，不要包含任何额外的解释性文字在JSON结构之外。确保输出的是有效的JSON，不要添加任何前缀、后缀、代码块标记或自然语言描述。直接输出JSON对象。",
-              "format": {
-                "student_answer_summary": "【请在此处对图片中的学生手写答案进行**中立、客观、不带任何主观判断**的【核心内容概括】（例如：“学生答案的主要内容为[...]，表述清晰。”或“学生填写了[...]，部分内容无法识别。”）",
-                "scoring_basis": "【请在此处综合阐述你给出 `itemized_scores` 中最终总分的详细理由。你需要：\n1. 参照【评分细则】中列出的各项整体评估维度（例如：内容切题性、思想深度、结构逻辑、语言表达、书写规范等）。\n2. 针对每一个主要评估维度，清晰描述从图片中观察到的学生表现。\n3. 解释这些不同维度的表现是如何共同作用，最终形成了你在 `itemized_scores` 中给出的那个总分。\n请确保你的阐述逻辑清晰、依据充分，并直接关联到最终的评分结果。\n（例如：\n- 维度1（如内容切题性）：学生表现[...具体描述...]，符合/不符合细则的[...某标准...]。\n- 维度2（如结构逻辑）：学生表现[...具体描述...]，符合/不符合细则的[...某标准...]。\n- (依此类推所有主要维度)\n- 综合评价：基于以上各维度表现，[简述如何综合考虑，例如哪些是主要影响因素]，并对照评分细则中的等级描述，最终评定总分为XX分。）",
-                "itemized_scores": "【一个【只包含一个数字的列表】，例如 `[45]` 或 `[8]`。这个数字代表你根据【评分细则】中的整体评估标准/评分维度给出的【最终总分】。】"
-              }
-            }
-          }
-        }
-        if ocr_mode:
-            prompt_json['system_message'] = self._get_common_system_message(ocr_mode=True)
-            prompt_json['user_task']['student_answer_image_placeholder'] = ""
-        return json.dumps(prompt_json, ensure_ascii=False, indent=2)
 
-    def select_and_build_prompt(self, standard_answer, question_type, ocr_mode=False):
-        """
-        根据题目类型选择并构建相应的Prompt。
+    def _build_formula_proof_prompt(self, standard_answer_rubric: str, ocr_mode: bool = False):
+        system_message = self._get_common_system_message(ocr_mode=ocr_mode)
+        user_prompt = (
+            "任务：公式计算/证明题阅卷。\n\n"
+            "【题目类型说明：公式计算/证明题】\n"
+            "- 逐一核对评分细则中的关键步骤/采分点：公式使用、代入、计算、推理/证明逻辑、符号书写等。\n"
+            "- 只按细则给分，不得补充采分点；任何关键步骤的证据不足都应触发人工介入（宁停勿错）。\n\n"
+            "【评分细则（原样）】\n"
+            f"{standard_answer_rubric.strip()}\n\n"
+            "【输出要求】\n"
+            "- 只输出一个JSON对象；字段必须包含：student_answer_summary, scoring_basis, itemized_scores。\n"
+            "- itemized_scores 为数字列表，长度应与步骤/采分点数量一致；若无法可靠确定数量，请触发人工介入并输出 [0]。\n\n"
+            "【scoring_basis写法（会被保存供用户查看）】\n"
+            "- 必须逐步列出：\n"
+            "  第1步 | 采分点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: x\n"
+            "  第2步 | 采分点: ... | 证据摘录: \"...\" | 判定: 命中/未命中 | 得分: y\n"
+        )
+        return {"system": system_message, "user": user_prompt}
+
+
+    def _build_holistic_evaluation_prompt(self, standard_answer_rubric: str, ocr_mode: bool = False):
+        system_message = self._get_common_system_message(ocr_mode=ocr_mode)
+        user_prompt = (
+            "任务：整体评估开放题（作文/论述等）阅卷。\n\n"
+            "【题目类型说明：整体评估开放题】\n"
+            "- 按评分细则的整体描述/等级描述给出总分。\n"
+            "- 若细则未提供维度，请不要自行发明维度；只需用学生答案中的直接证据解释该分数。\n\n"
+            "【评分细则（原样）】\n"
+            f"{standard_answer_rubric.strip()}\n\n"
+            "【输出要求】\n"
+            "- 只输出一个JSON对象；字段必须包含：student_answer_summary, scoring_basis, itemized_scores。\n"
+            "- itemized_scores 必须是只包含一个数字的列表（例如 [45]）代表总分；证据不足则触发人工介入并输出 [0]。\n\n"
+            "【证据门槛】\n"
+            "- 给出总分时，必须在 scoring_basis 提供若干条‘证据摘录’（来自学生答案原文片段）支撑该分数。\n"
+            "- 若难以提供能核对的证据摘录（例如内容残缺/歧义大），请触发人工介入（宁停勿错）。\n\n"
+            "【scoring_basis写法（会被保存供用户查看）】\n"
+            "- 参考写法（不引入新维度，只写证据与理由）：\n"
+            "  证据摘录1: \"...\" | 说明: 与细则中...对应\n"
+            "  证据摘录2: \"...\" | 说明: 与细则中...对应\n"
+            "  总分理由: ...\n"
+        )
+        return {"system": system_message, "user": user_prompt}
+
+    def select_and_build_prompt(self, standard_answer, question_type, ocr_mode: bool = False):
+        """根据题目类型选择并构建相应的Prompt。
+
+        返回结构：
+            {"system": <system_message_str>, "user": <user_prompt_str>}
+
+        说明：
+        - system 会作为真正的 system role 发送（由 api_service 负责）
+        - user 是评分任务指令文本（非JSON载体），模型输出仍必须为JSON
         """
         # 确保 standard_answer 是字符串类型，如果不是，尝试转换或记录错误
         if not isinstance(standard_answer, str):
@@ -1099,7 +1115,7 @@ class GradingThread(QThread):
                     return "", {
                         'manual_intervention': True,
                         'reason': error_msg,
-                        'detailed_reason': f"⚠️ OCR返回的数据格式异常，无法信任\n\n错误详情：\n{error_msg}\n\n建议：请检查百度OCR的返回格式是否符合预期，或联系技术支持"
+                        'detailed_reason': f"⚠️ OCR返回的数据格式异常，无法信任\n\n错误详情：\n{error_msg}\n\n建议：请人工查看该答题卡并手动评分"
                     }
             
             # 统计信息
@@ -1166,7 +1182,7 @@ class GradingThread(QThread):
                 return "", {
                     'manual_intervention': True,
                     'reason': error_msg,
-                    'detailed_reason': f"⚠️ OCR置信度计算异常，无法信任识别结果\n\n错误详情：\n{error_msg}\n\n建议：请手动检查答题卡清晰度，或联系技术支持"
+                    'detailed_reason': f"⚠️ OCR置信度计算异常，无法信任识别结果\n\n错误详情：\n{error_msg}\n\n建议：答题卡清晰度不佳，请人工查看该答题卡并手动评分"
                 }
             
             # 🎯 获取用户选择的质量等级和对应阈值（使用传入的参数）
@@ -1311,7 +1327,7 @@ class GradingThread(QThread):
             return "", {
                 'manual_intervention': True,
                 'reason': f'OCR处理异常: {str(e)}',
-                'detailed_reason': f"⚠️ OCR处理过程发生异常\n\n错误详情：\n{str(e)}\n\n建议：请联系技术支持或手动评分"
+                'detailed_reason': f"⚠️ OCR处理过程发生异常\n\n错误详情：\n{str(e)}\n\n建议：请人工查看该答题卡并手动评分"
             }
 
 
@@ -1661,9 +1677,9 @@ class GradingThread(QThread):
         triggers = [
             '需人工介入', '人工介入', '需要人工介入', '需人工复核', '人工复核',
             '无法判定', '无法评判', '无法判断', '无法评分',
-            '无法判定的涂改', '涂改', '自我修正', '自我更正', '改错',
+            '无法判定的涂改',  '无法识别',
             '噪声太大', '识别噪声', '识别错误', '识别失败', '乱码',
-            '逻辑混乱', '算式不成立', '逻辑不通顺', 'ocr 文本逻辑混乱', '疑似ocr错误',
+            '逻辑混乱', '逻辑不通顺', 'ocr 文本逻辑混乱', '疑似ocr错误',
             'manual intervention', 'need manual', 'cannot judge', 'cannot score', 'unclear', 'requires manual'
         ]
 

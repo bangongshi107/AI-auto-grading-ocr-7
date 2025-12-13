@@ -279,13 +279,13 @@ class ApiService:
     def set_current_question(self, index: int):
         self.current_question_index = index
 
-    def call_first_api(self, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+    def call_first_api(self, img_str: str, prompt: Any, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
         return self._call_api_by_group("first", img_str, prompt, ocr_text)
 
-    def call_second_api(self, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+    def call_second_api(self, img_str: str, prompt: Any, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
         return self._call_api_by_group("second", img_str, prompt, ocr_text)
 
-    def _call_api_by_group(self, api_group: str, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+    def _call_api_by_group(self, api_group: str, img_str: str, prompt: Any, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
         """根据API组别调用对应的预设供应商API"""
         try:
             if api_group == "first":
@@ -479,7 +479,7 @@ class ApiService:
         # 其他鉴权方法直接返回
         return api_key, None
 
-    def _execute_api_call(self, provider: str, api_key: str, model_id: str, img_str: str, prompt: str, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
+    def _execute_api_call(self, provider: str, api_key: str, model_id: str, img_str: str, prompt, ocr_text: str = "") -> Tuple[Optional[str], Optional[str]]:
         # 在函数开始就获取provider_name，避免异常处理时未定义
         provider_name = PROVIDER_CONFIGS.get(provider, {}).get("name", provider)
         
@@ -502,10 +502,26 @@ class ApiService:
         if key_error:
             return None, key_error
 
-        # 如果有OCR文本，将其添加到prompt中
+        # 如果有OCR文本，将其以结构化段落注入到 user 内容中（避免破坏输出JSON要求）
         enhanced_prompt = prompt
-        if ocr_text and ocr_text.strip():
-            enhanced_prompt = f"OCR识别的文字内容：\n{ocr_text.strip()}\n\n{prompt}"
+        if ocr_text and isinstance(ocr_text, str) and ocr_text.strip():
+            if isinstance(prompt, dict):
+                sys_text = str(prompt.get("system", "") or "")
+                user_text = str(prompt.get("user", "") or "")
+                user_text = (
+                    "【OCR识别文本】\n"
+                    f"{ocr_text.strip()}\n\n"
+                    "【评分任务】\n"
+                    f"{user_text}"
+                )
+                enhanced_prompt = {"system": sys_text, "user": user_text}
+            else:
+                enhanced_prompt = (
+                    "【OCR识别文本】\n"
+                    f"{ocr_text.strip()}\n\n"
+                    "【评分任务】\n"
+                    f"{str(prompt)}"
+                )
 
         # 防御性检查: 不允许在一次API调用中同时提供图像和OCR文本作为双重输入
         if img_str and isinstance(img_str, str) and img_str.strip() and ocr_text and isinstance(ocr_text, str) and ocr_text.strip():
@@ -747,18 +763,33 @@ class ApiService:
         适用于大多数与OpenAI兼容的厂商 (Moonshot, 智谱, Baidu V2, Aliyun-Compatible等)
         核心原则: 图片在前，文本在后，以保证最大兼容性。
         """
+        # 支持 prompt 为字符串或 {system,user} 结构
+        system_text = ""
+        user_text = ""
+        if isinstance(prompt, dict):
+            system_text = str(prompt.get("system", "") or "")
+            user_text = str(prompt.get("user", "") or "")
+        else:
+            user_text = str(prompt)
+
+        messages = []
+        if system_text.strip():
+            messages.append({"role": "system", "content": system_text})
+
         if not img_str:
-            return {"model": model_id, "messages": [{"role": "user", "content": prompt}], "max_tokens": 4096}
+            messages.append({"role": "user", "content": user_text})
+            return {"model": model_id, "messages": messages, "max_tokens": 4096}
 
         pure_base64 = self._get_pure_base64(img_str)
-        return {
-            "model": model_id,
-            "messages": [{"role": "user", "content": [
+        # 视觉模式：system 作为单独消息，user 带 image+text
+        messages.append({
+            "role": "user",
+            "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{pure_base64}"}},
-                {"type": "text", "text": prompt}
-            ]}],
-            "max_tokens": 4096
-        }
+                {"type": "text", "text": user_text}
+            ]
+        })
+        return {"model": model_id, "messages": messages, "max_tokens": 4096}
 
 
 
@@ -784,37 +815,40 @@ class ApiService:
         4. 配置选项: 允许用户自定义detail参数
         5. 批量优化: 支持多图片同时处理
         """
+        system_text = ""
+        user_text = ""
+        if isinstance(prompt, dict):
+            system_text = str(prompt.get("system", "") or "")
+            user_text = str(prompt.get("user", "") or "")
+        else:
+            user_text = str(prompt)
+
+        messages = []
+        if system_text.strip():
+            messages.append({"role": "system", "content": system_text})
+
         if not img_str:
-            # 纯文本模式 - 不涉及图片时使用简单格式
-            return {
-                "model": model_id,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 4096
-            }
+            # 纯文本模式
+            messages.append({"role": "user", "content": user_text})
+            return {"model": model_id, "messages": messages, "max_tokens": 4096}
 
         # 视觉模式 - AI改卷专用配置
         # 按照火山引擎官方文档：image在前，text在后
         pure_base64 = self._get_pure_base64(img_str)
-        return {
-            "model": model_id,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{pure_base64}",
-                            "detail": "high"  # 高细节模式 - 优化手写文字识别
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{pure_base64}",
+                        "detail": "high"
                     }
-                ]
-            }],
-            "max_tokens": 4096
-        }
+                },
+                {"type": "text", "text": user_text}
+            ]
+        })
+        return {"model": model_id, "messages": messages, "max_tokens": 4096}
 
 
 
@@ -852,47 +886,67 @@ class ApiService:
         Returns:
             dict: 符合腾讯API格式的请求payload
         """
+        system_text = ""
+        user_text = ""
+        if isinstance(prompt, dict):
+            system_text = str(prompt.get("system", "") or "")
+            user_text = str(prompt.get("user", "") or "")
+        else:
+            user_text = str(prompt)
+
         # 腾讯所有视觉模型都支持图像输入，通过模型名中的 "vision" 标识
         is_vision_model = "vision" in model_id.lower()
 
         if not img_str or not is_vision_model:
             # 纯文本模式或非视觉模型
-            return {
-                "Model": model_id,
-                "Messages": [{"Role": "user", "Content": prompt}],
-                "Stream": False
-            }
+            messages = []
+            if system_text.strip():
+                messages.append({"Role": "system", "Content": system_text})
+            messages.append({"Role": "user", "Content": user_text})
+            return {"Model": model_id, "Messages": messages, "Stream": False}
 
         # 视觉模型支持图像输入
         pure_base64 = self._get_pure_base64(img_str)
-        return {
-            "Model": model_id,
-            "Messages": [{
-                "Role": "user",
-                "Contents": [
-                    {"Type": "text", "Text": prompt},
-                    {"Type": "image_url", "ImageUrl": {"Url": f"data:image/jpeg;base64,{pure_base64}"}}
-                ]
-            }],
-            "Stream": False
-        }
+        messages = []
+        if system_text.strip():
+            messages.append({"Role": "system", "Content": system_text})
+        messages.append({
+            "Role": "user",
+            "Contents": [
+                {"Type": "text", "Text": user_text},
+                {"Type": "image_url", "ImageUrl": {"Url": f"data:image/jpeg;base64,{pure_base64}"}}
+            ]
+        })
+        return {"Model": model_id, "Messages": messages, "Stream": False}
 
 
 
     def _build_gemini_payload(self, model_id, img_str, prompt):
         """专为 Google Gemini 定制"""
+        system_text = ""
+        user_text = ""
+        if isinstance(prompt, dict):
+            system_text = str(prompt.get("system", "") or "")
+            user_text = str(prompt.get("user", "") or "")
+        else:
+            user_text = str(prompt)
+
+        payload = {}
+        if system_text.strip():
+            payload["system_instruction"] = {"parts": [{"text": system_text}]}
+
         if not img_str:
-             return {"contents": [{"parts": [{"text": prompt}]}]}
+            payload["contents"] = [{"parts": [{"text": user_text}]}]
+            return payload
 
         pure_base64 = self._get_pure_base64(img_str)
-        return {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": pure_base64}}
-                ]
-            }]
-        }
+        payload["contents"] = [{
+            "parts": [
+                {"text": user_text},
+                {"inline_data": {"mime_type": "image/jpeg", "data": pure_base64}}
+            ]
+        }]
+        return payload
 
     def _build_baidu_ocr_payload(self, model_id, img_str, prompt):
         """专为百度OCR定制 - 手写文字识别

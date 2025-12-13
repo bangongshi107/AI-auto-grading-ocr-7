@@ -85,20 +85,20 @@ QComboBox:focus {
 }
 
 /* 只读/不可编辑：用偏灰蓝底 + 更弱文字/边框，和可输入控件明显区分 */
-QLineEdit[readOnly="true"],
-QPlainTextEdit[readOnly="true"],
-QTextEdit[readOnly="true"] {
+QLineEdit[readOnly=&quot;true&quot;],
+QPlainTextEdit[readOnly=&quot;true&quot;],
+QTextEdit[readOnly=&quot;true&quot;] {
     background-color: #F2F7FF;
     color: #5E6F80;
     border: 1px dashed #AFCBFF;
 }
 
-QLineEdit[readOnly="true"]:hover,
-QPlainTextEdit[readOnly="true"]:hover,
-QTextEdit[readOnly="true"]:hover,
-QLineEdit[readOnly="true"]:focus,
-QPlainTextEdit[readOnly="true"]:focus,
-QTextEdit[readOnly="true"]:focus {
+QLineEdit[readOnly=&quot;true&quot;]:hover,
+QPlainTextEdit[readOnly=&quot;true&quot;]:hover,
+QTextEdit[readOnly=&quot;true&quot;]:hover,
+QLineEdit[readOnly=&quot;true&quot;]:focus,
+QPlainTextEdit[readOnly=&quot;true&quot;]:focus,
+QTextEdit[readOnly=&quot;true&quot;]:focus {
     background-color: #F2F7FF;
     color: #5E6F80;
     border: 1px dashed #AFCBFF;
@@ -683,7 +683,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string> 步长:</string>
+                 <string> 步长</string>
                 </property>
                </widget>
               </item>
@@ -846,7 +846,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>
@@ -993,7 +993,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>
@@ -1140,7 +1140,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>
@@ -1287,7 +1287,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>
@@ -1434,7 +1434,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>
@@ -1581,7 +1581,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>
@@ -1728,7 +1728,7 @@ QScrollBar::sub-line:horizontal {
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  步长:</string>
+                 <string>  步长</string>
                 </property>
                </widget>
               </item>

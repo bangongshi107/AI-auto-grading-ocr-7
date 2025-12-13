@@ -25,9 +25,9 @@ class MyWindow2(QMainWindow):
     def __init__(self, parent=None, question_index=None):
         super(MyWindow2, self).__init__(parent)
 
-        # 固定答案框窗口字号为 10（与题目配置信息界面一致）
+        # 固定答案框窗口字号为 11（与题目配置信息界面一致，调大一号）
         try:
-            self.setFont(QFont("微软雅黑", 10))
+            self.setFont(QFont("微软雅黑", 11))
         except Exception:
             pass
 
@@ -303,9 +303,9 @@ class QuestionConfigDialog(QDialog):
         # 设置为非模态对话框，允许同时编辑其他窗口
         self.setModal(False)
         
-        # ✨ 设置此对话框的全局字体大小为 10（覆盖应用全局的 11）
-        # 便于未来调整，只需修改下面的 10 即可
-        self._apply_font_size(font_size=10)
+        # ✨ 设置此对话框的全局字体大小为 11（覆盖应用全局的 11），调大一号
+        # 便于未来调整，只需修改下面的 11 即可
+        self._apply_font_size(font_size=11)
         
         self.parent_window: Optional[Any] = parent
         self.config_manager: Optional[Any] = config_manager

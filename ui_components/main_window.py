@@ -191,6 +191,21 @@ class MainWindow(QMainWindow):
         self._trim_question_tabs_to_max()
 
         self.setup_question_selector()
+        # 将选中选项卡设置为高亮背景，便于视觉识别当前小题
+        try:
+            tab_widget = self.get_ui_element('questionTabs')
+            if tab_widget:
+                try:
+                    tabbar = tab_widget.tabBar()
+                    # 选中时黄色背景，未选中时白色，增加内边距让视觉更明显
+                    tabbar.setStyleSheet(
+                        "QTabBar::tab:selected { background: #FFF9C4; color: #0b3a5a; border:1px solid #FFE5B4; border-radius:4px; }"
+                        "QTabBar::tab { background: #ffffff; color: #333; padding:6px 12px; margin:2px; }"
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
         # ... 其他 setup 方法 ...
         self.setup_text_fields()
         self.setup_dual_evaluation()
@@ -316,6 +331,15 @@ class MainWindow(QMainWindow):
 
             # 加载完成后，应用所有UI约束
             self._apply_ui_constraints()
+            # 强制切换到第一小题，确保每次启动默认显示第1题
+            try:
+                tab_widget = self.get_ui_element('questionTabs')
+                if tab_widget:
+                    tab_widget.setCurrentIndex(0)
+                    self.current_question = 1
+            except Exception:
+                pass
+
             self.log_message("配置已成功加载到UI并应用约束。")
             self._config_loaded_once = True
         except Exception as e:
@@ -1083,6 +1107,8 @@ class MainWindow(QMainWindow):
         test_btn = self.get_ui_element('api_test_button')
         if test_btn and isinstance(test_btn, QPushButton):
             test_btn.clicked.connect(self.test_api_connections)
+            # 将“测试API连接”按钮颜色调为介于之前和当前之间的颜色（仅修改视觉）
+            test_btn.setStyleSheet("background-color: #D6ECFF; color: #0b3a5a;")
         
         # 支持7道题的配置按钮
         for i in range(1, self.max_questions + 1):
