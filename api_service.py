@@ -299,6 +299,20 @@ class ApiService:
             else:
                 return None, "无效的API组别"
 
+            # 兼容：provider 可能是 UI 文本（如“火山引擎 (推荐)”）而不是内部ID（如 volcengine）
+            if provider and provider not in PROVIDER_CONFIGS:
+                mapped_provider = get_provider_id_from_ui_text(str(provider))
+                if mapped_provider:
+                    provider = mapped_provider
+                    # 写回内存，确保后续保存会落盘为内部ID
+                    try:
+                        if api_group == "first":
+                            self.config_manager.first_api_provider = provider
+                        elif api_group == "second":
+                            self.config_manager.second_api_provider = provider
+                    except Exception:
+                        pass
+
             if not all([provider, api_key, model_id]):
                 return None, f"第{api_group}组API配置不完整 (供应商、Key或模型ID为空)"
 
@@ -332,6 +346,19 @@ class ApiService:
             
             if not all([provider, api_key.strip(), model_id.strip()]):
                 return False, f"{group_name}API配置不完整"
+
+            # 兼容：provider 可能是 UI 文本
+            if provider and provider not in PROVIDER_CONFIGS:
+                mapped_provider = get_provider_id_from_ui_text(str(provider))
+                if mapped_provider:
+                    provider = mapped_provider
+                    try:
+                        if api_group == "first":
+                            self.config_manager.first_api_provider = provider
+                        elif api_group == "second":
+                            self.config_manager.second_api_provider = provider
+                    except Exception:
+                        pass
 
             # 测试AI评分API
             print(f"[API Test] 测试{group_name}API, 供应商: {provider}")

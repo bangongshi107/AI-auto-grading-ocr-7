@@ -4,6 +4,41 @@ import datetime
 import pathlib
 import warnings
 
+# 设置 Qt 插件路径，避免平台插件加载失败
+def _set_qt_platform_plugin_path() -> None:
+    """Set QT_QPA_PLATFORM_PLUGIN_PATH for both dev and frozen runs.
+
+    This reduces "could not load the Qt platform plugin" startup failures.
+    """
+    candidate_paths = []
+
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidate_paths.append(os.path.join(exe_dir, 'PyQt5', 'Qt5', 'plugins', 'platforms'))
+        # Common PyInstaller layouts
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidate_paths.append(os.path.join(meipass, 'PyQt5', 'Qt5', 'plugins', 'platforms'))
+            candidate_paths.append(os.path.join(meipass, 'Qt5', 'plugins', 'platforms'))
+            candidate_paths.append(os.path.join(meipass, 'Qt', 'plugins', 'platforms'))
+    else:
+        try:
+            import PyQt5
+            candidate_paths.append(os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms'))
+        except Exception:
+            return
+
+    for path in candidate_paths:
+        if path and os.path.isdir(path):
+            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = path
+            return
+
+
+try:
+    _set_qt_platform_plugin_path()
+except Exception:
+    pass
+
 # 过滤PyQt5的弃用警告
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='PyQt5')
 
@@ -54,7 +89,6 @@ class SimpleNotificationDialog(QDialog):
 
         # 消息标签
         msg_label = QLabel(message)
-        msg_label.setFont(QFont("Arial", 11))
         msg_label.setWordWrap(True)
         msg_label.setStyleSheet("padding: 20px;")
         layout.addWidget(msg_label)
@@ -136,14 +170,12 @@ class ManualInterventionDialog(QDialog):
 
         # 主消息
         msg_label = QLabel(message)
-        msg_label.setFont(QFont("Arial", 12))
         msg_label.setWordWrap(True)
         msg_label.setStyleSheet("padding: 12px;")
         layout.addWidget(msg_label)
 
         # 原始反馈（可折叠/展示）
         fb_label = QLabel("检测到的AI原始反馈（仅供参考）：\n" + (self.raw_feedback[:1000] or "(无)") )
-        fb_label.setFont(QFont("Arial", 10))
         fb_label.setWordWrap(True)
         fb_label.setStyleSheet("padding: 6px; color: #333333; background: #f7f7f7; border-radius:4px;")
         layout.addWidget(fb_label)
@@ -233,7 +265,13 @@ class SignalConnectionManager:
 class Application:
     def __init__(self):
         self.app = QApplication(sys.argv)
+        # 先加载配置管理器，以便应用字体可由配置控制
         self.config_manager = ConfigManager()
+        # 固定主界面字号为 11（不提供用户自行调整字号的入口）
+        try:
+            self.app.setFont(QFont("微软雅黑", 11))
+        except Exception:
+            pass
         self.api_service = ApiService(self.config_manager)
         self.worker = GradingThread(self.api_service, self.config_manager)
         self.main_window = MainWindow(self.config_manager, self.api_service, self.worker)

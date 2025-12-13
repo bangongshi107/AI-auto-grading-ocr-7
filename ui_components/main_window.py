@@ -1,20 +1,21 @@
-# --- START OF FILE main_window.py ---
+﻿# --- START OF FILE main_window.py ---
 
 import sys
 import os
 import datetime
 import pathlib
 import traceback
+from typing import Union, Optional, Type, TypeVar, cast
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QMessageBox, QDialog,
                              QComboBox, QLineEdit, QCheckBox, QSpinBox,
                              QPlainTextEdit, QApplication, QShortcut, QLabel, QPushButton)
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QKeySequence, QFont
+from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QObject
+from PyQt5.QtGui import QKeySequence, QFont, QKeyEvent, QCloseEvent
 from PyQt5 import uic
 
 # --- 新增导入 ---
 # 从 api_service.py 导入转换函数和UI文本列表生成函数
-from api_service import get_provider_id_from_ui_text, get_ui_text_from_provider_id, UI_TEXT_TO_PROVIDER_ID
+from api_service import get_provider_id_from_ui_text, get_ui_text_from_provider_id, UI_TEXT_TO_PROVIDER_ID, PROVIDER_CONFIGS
 
 class MainWindow(QMainWindow):
     # 日志级别定义
@@ -39,7 +40,7 @@ class MainWindow(QMainWindow):
 
         # ... (UI文件加载部分保持不变) ...
         if getattr(sys, 'frozen', False):
-            base_path = sys._MEIPASS
+            base_path = sys._MEIPASS  # type: ignore
         else:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         ui_path = os.path.join(base_path, "setting", "八题.ui")
@@ -48,8 +49,8 @@ class MainWindow(QMainWindow):
         # ... (其他初始化属性保持不变) ...
         self.answer_windows = {}
         self.current_question = 1
-        self.max_questions = 8  # 多题模式支持8道题
-        self.shortcut_esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self.max_questions = 7  # 多题模式最多支持7道题（已移除第8题）
+        self.shortcut_esc = QShortcut(QKeySequence("Ctrl+Shift+Escape"), self)
         self.shortcut_esc.activated.connect(self.stop_auto_thread)
         self._ui_cache = {}
 
@@ -119,7 +120,7 @@ class MainWindow(QMainWindow):
         # API Key 和 Model ID 字段
         for field_name in ['first_api_key', 'first_modelID', 'second_api_key', 'second_modelID', 'baidu_ocr_api_key', 'baidu_ocr_secret_key']:
             widget = self.get_ui_element(field_name, QLineEdit)
-            if widget:
+            if isinstance(widget, QLineEdit):
                 widget.editingFinished.connect(
                     lambda field=field_name, w=widget: self.handle_lineEdit_save(field, w.text())
                 )
@@ -152,14 +153,16 @@ class MainWindow(QMainWindow):
         widget.setProperty('needs_save_on_focus_out', True)
         widget.installEventFilter(self)
 
-    def eventFilter(self, obj, event):
-        if (event.type() == event.FocusOut and
-            hasattr(obj, 'property') and
-            obj.property('needs_save_on_focus_out')):
-            q_index = obj.property('question_index')
+    def eventFilter(self, a0: Optional[QObject], a1: Optional[QEvent]) -> bool:
+        if (a0 and a1 and a1.type() == QEvent.Type.FocusOut and
+            hasattr(a0, 'property') and
+            a0.property('needs_save_on_focus_out')):
+            q_index = a0.property('question_index')
             field_name = f"question_{q_index}_standard_answer"
-            self.handle_plainTextEdit_save(field_name, obj.toPlainText())
-        return super().eventFilter(obj, event)
+            plain_text_edit = cast(Optional[QPlainTextEdit], a0)
+            if plain_text_edit:
+                self.handle_plainTextEdit_save(field_name, plain_text_edit.toPlainText())
+        return super().eventFilter(cast(QObject, a0), cast(QEvent, a1))
 
     # ==========================================================================
     #  UI初始化和加载逻辑
@@ -184,6 +187,9 @@ class MainWindow(QMainWindow):
                 combo_box.clear()
                 combo_box.addItems(provider_ui_texts)
 
+        # UI文件历史上包含第8题Tab；此处确保运行时只保留7题
+        self._trim_question_tabs_to_max()
+
         self.setup_question_selector()
         # ... 其他 setup 方法 ...
         self.setup_text_fields()
@@ -196,6 +202,22 @@ class MainWindow(QMainWindow):
         self._connect_signals() # <--- 在这里统一调用
 
         self.log_message("UI组件初始化完成")
+
+    def _trim_question_tabs_to_max(self) -> None:
+        """确保题目Tabs数量不超过 self.max_questions。
+
+        这样即使UI文件仍含“第8题”相关控件，运行时也会被移除，用户不可见。
+        """
+        tab_widget = self.get_ui_element('questionTabs')
+        if not tab_widget:
+            return
+
+        try:
+            while tab_widget.count() > self.max_questions:
+                tab_widget.removeTab(tab_widget.count() - 1)
+        except Exception:
+            # UI控件异常时保持容错，不阻断主界面启动
+            pass
     
     def load_config_to_ui(self):
         """将配置从ConfigManager加载到UI控件"""
@@ -207,7 +229,7 @@ class MainWindow(QMainWindow):
             # 加载 API Key 和 Model ID
             for field in ['first_api_key', 'first_modelID', 'second_api_key', 'second_modelID']:
                 widget = self.get_ui_element(field, QLineEdit)
-                if widget:
+                if widget and isinstance(widget, QLineEdit):
                     widget.setText(getattr(self.config_manager, field, ""))
             
             # --- 核心修改: 加载 Provider 并设置 ComboBox ---
@@ -217,7 +239,7 @@ class MainWindow(QMainWindow):
             }
             for combo_name, provider_id in provider_map.items():
                 combo_box = self.get_ui_element(combo_name, QComboBox)
-                if combo_box:
+                if combo_box and isinstance(combo_box, QComboBox):
                     # 将内部ID (如 "volcengine") 转换为UI文本 (如 "火山引擎 (推荐)")
                     ui_text_to_select = get_ui_text_from_provider_id(provider_id)
                     if ui_text_to_select:
@@ -225,18 +247,30 @@ class MainWindow(QMainWindow):
                     else:
                         combo_box.setCurrentIndex(0) # 如果找不到，默认选第一个
 
-        # 加载其他配置 (保持不变)
+            # 加载其他配置 (保持不变)
             subject_widget = self.get_ui_element('subject_text', QComboBox)
             if subject_widget: subject_widget.setCurrentText(self.config_manager.subject)
-            self.get_ui_element('cycle_number').setValue(self.config_manager.cycle_number)
-            self.get_ui_element('wait_time').setValue(self.config_manager.wait_time)
-            self.get_ui_element('dual_evaluation_enabled').setChecked(self.config_manager.dual_evaluation_enabled)
-            self.get_ui_element('score_diff_threshold').setValue(self.config_manager.score_diff_threshold)
+            
+            cycle_element = self.get_ui_element('cycle_number')
+            if cycle_element and isinstance(cycle_element, QSpinBox):
+                cycle_element.setValue(self.config_manager.cycle_number)
+            
+            wait_element = self.get_ui_element('wait_time')
+            if wait_element and isinstance(wait_element, QSpinBox):
+                wait_element.setValue(self.config_manager.wait_time)
+
+            dual_element = self.get_ui_element('dual_evaluation_enabled', QCheckBox)
+            if dual_element and isinstance(dual_element, QCheckBox):
+                dual_element.setChecked(self.config_manager.dual_evaluation_enabled)
+            
+            threshold_element = self.get_ui_element('score_diff_threshold')
+            if threshold_element and isinstance(threshold_element, QSpinBox):
+                threshold_element.setValue(self.config_manager.score_diff_threshold)
 
             # 加载百度OCR API密钥配置
-            if hasattr(self, 'baidu_api_key_edit'):
+            if hasattr(self, 'baidu_api_key_edit') and isinstance(self.baidu_api_key_edit, QLineEdit):
                 self.baidu_api_key_edit.setText(self.config_manager.baidu_ocr_api_key)
-            if hasattr(self, 'baidu_secret_key_edit'):
+            if hasattr(self, 'baidu_secret_key_edit') and isinstance(self.baidu_secret_key_edit, QLineEdit):
                 self.baidu_secret_key_edit.setText(self.config_manager.baidu_ocr_secret_key)
             
             # 加载题目配置 (支持8道题)
@@ -245,17 +279,17 @@ class MainWindow(QMainWindow):
                 
                 # 加载评分细则
                 std_answer = self.get_ui_element(f'StandardAnswer_text_{i}')
-                if std_answer: 
+                if std_answer and isinstance(std_answer, QPlainTextEdit): 
                     std_answer.setPlainText(q_config.get('standard_answer', ''))
                 
                 # 加载启用状态
                 enable_cb = self.get_ui_element(f'enableQuestion{i}')
-                if enable_cb and i > 1:  # 第一题始终启用
+                if enable_cb and i > 1 and isinstance(enable_cb, QCheckBox):  # 第一题始终启用
                     enable_cb.setChecked(q_config.get('enabled', False))
                 
                 # 加载每题独立的步长
                 step_combo = self.get_ui_element(f'score_rounding_step_{i}')
-                if step_combo:
+                if step_combo and isinstance(step_combo, QComboBox):
                     step_value = q_config.get('score_rounding_step', 0.5)
                     # 将步长值转为显示文本（0.5 显示为 "0.5"，1.0 显示为 "1"）
                     step_text = "1" if step_value == 1.0 else "0.5"
@@ -263,13 +297,14 @@ class MainWindow(QMainWindow):
                 
                 # 加载每题独立的OCR模式
                 ocr_mode_combo = self.get_ui_element(f'ocr_mode_{i}', QComboBox)
-                if ocr_mode_combo:
+                if ocr_mode_combo and isinstance(ocr_mode_combo, QComboBox):
                     ocr_mode_index = q_config.get('ocr_mode_index', 0)
+                    ocr_mode_combo.setCurrentIndex(ocr_mode_index)
                     ocr_mode_combo.setCurrentIndex(ocr_mode_index)
                 
                 # 加载每题独立的OCR精度
                 ocr_quality_combo = self.get_ui_element(f'ocr_quality_{i}', QComboBox)
-                if ocr_quality_combo:
+                if ocr_quality_combo and isinstance(ocr_quality_combo, QComboBox):
                     quality_level = q_config.get('ocr_quality_level', 'moderate')
                     # 转换内部值为UI文本
                     quality_ui_map = {'relaxed': '宽松', 'moderate': '适度', 'strict': '严格'}
@@ -294,6 +329,10 @@ class MainWindow(QMainWindow):
 
     def auto_run_but_clicked(self):
         """自动运行按钮点击事件"""
+        # 先做启动前校验（包含：供应商UI文本→内部ID归一化、必要坐标检查等），避免“保存了错误配置”或“启动→秒停”。
+        if not self.check_required_settings():
+            return
+
         self.log_message("尝试在运行前保存所有配置...")
         if not self.config_manager.save_all_configs_to_file():
             self.log_message("错误：运行前保存配置失败！无法启动自动阅卷。", is_error=True)
@@ -309,10 +348,6 @@ class MainWindow(QMainWindow):
             msg_box.exec_()
             return
         self.log_message("所有配置已成功保存。")
-
-        # --- 核心修改: check_required_settings 现在直接使用 ConfigManager 的数据 ---
-        if not self.check_required_settings():
-            return # check_required_settings 内部会打日志和弹窗
 
         # 显示提醒对话框
         msg_box = QMessageBox(self)
@@ -410,24 +445,84 @@ class MainWindow(QMainWindow):
     def check_required_settings(self):
         """检查必要的设置是否已配置"""
         errors = []
-        # 直接从 ConfigManager 检查
-        if not self.config_manager.first_api_provider: errors.append("请为第一组API选择一个供应商")
-        if not self.config_manager.first_api_key.strip(): errors.append("第一组API的密钥不能为空")
-        if not self.config_manager.first_modelID.strip(): errors.append("第一组API的模型ID不能为空")
+        def _resolve_provider_to_id(value: str) -> str:
+            v = (value or "").strip()
+            if not v:
+                return ""
+            if v in PROVIDER_CONFIGS:
+                return v
+            mapped = get_provider_id_from_ui_text(v)
+            return mapped or ""
+
+        def _is_valid_pos(pos) -> bool:
+            if not pos:
+                return False
+            if not isinstance(pos, (tuple, list)) or len(pos) != 2:
+                return False
+            try:
+                x, y = int(pos[0]), int(pos[1])
+            except Exception:
+                return False
+            return not (x == 0 and y == 0)
+
+        # --- AI供应商配置：允许用户UI文本，但启动前必须能解析为内部ID ---
+        first_provider_id = _resolve_provider_to_id(getattr(self.config_manager, 'first_api_provider', ''))
+        if not first_provider_id:
+            errors.append("请为第一组API选择一个有效的供应商")
+        else:
+            # 写回内存，确保后续保存会落盘为内部ID
+            self.config_manager.update_config_in_memory('first_api_provider', first_provider_id)
+
+        if not self.config_manager.first_api_key.strip():
+            errors.append("第一组API的密钥不能为空")
+        if not self.config_manager.first_modelID.strip():
+            errors.append("第一组API的模型ID不能为空")
 
         if self.config_manager.dual_evaluation_enabled:
-            if not self.config_manager.second_api_provider: errors.append("双评模式下，请为第二组API选择一个供应商")
-            if not self.config_manager.second_api_key.strip(): errors.append("第二组API的密钥不能为空")
-            if not self.config_manager.second_modelID.strip(): errors.append("第二组API的模型ID不能为空")
+            second_provider_id = _resolve_provider_to_id(getattr(self.config_manager, 'second_api_provider', ''))
+            if not second_provider_id:
+                errors.append("双评模式下，请为第二组API选择一个有效的供应商")
+            else:
+                self.config_manager.update_config_in_memory('second_api_provider', second_provider_id)
 
-        # 检查所有启用的题目的评分细则和答案区域
+            if not self.config_manager.second_api_key.strip():
+                errors.append("第二组API的密钥不能为空")
+            if not self.config_manager.second_modelID.strip():
+                errors.append("第二组API的模型ID不能为空")
+
+        # 检查所有启用的题目的评分细则、答案区域、以及必要坐标（分数输入/确认按钮/三步输入）
         enabled_questions = self.config_manager.get_enabled_questions()
+
+        is_single_q1_run = (len(enabled_questions) == 1 and enabled_questions[0] == 1)
+        q1_cfg = self.config_manager.get_question_config(1)
+        q1_three_step = bool(q1_cfg.get('enable_three_step_scoring', False))
+
         for q_idx in enabled_questions:
             q_cfg = self.config_manager.get_question_config(q_idx)
             if not q_cfg.get('standard_answer', '').strip():
                 errors.append(f"第{q_idx}题已启用但未设置评分细则")
             if not q_cfg.get('answer_area'):
                 errors.append(f"第{q_idx}题已启用但未配置答案区域")
+
+            # 坐标校验：减少“启动→秒停”
+            confirm_pos = q_cfg.get('confirm_button_pos')
+            if not _is_valid_pos(confirm_pos):
+                errors.append(f"第{q_idx}题已启用但未配置确认按钮坐标")
+
+            if q_idx == 1 and is_single_q1_run and q1_three_step:
+                p1 = q_cfg.get('score_input_pos_step1')
+                p2 = q_cfg.get('score_input_pos_step2')
+                p3 = q_cfg.get('score_input_pos_step3')
+                if not _is_valid_pos(p1):
+                    errors.append("第一题启用三步打分，但未配置步骤1输入坐标")
+                if not _is_valid_pos(p2):
+                    errors.append("第一题启用三步打分，但未配置步骤2输入坐标")
+                if not _is_valid_pos(p3):
+                    errors.append("第一题启用三步打分，但未配置步骤3输入坐标")
+            else:
+                score_pos = q_cfg.get('score_input_pos')
+                if not _is_valid_pos(score_pos):
+                    errors.append(f"第{q_idx}题已启用但未配置分数输入坐标")
         
         # 检查使用百度OCR的题目是否配置了API密钥
         baidu_ocr_questions = []
@@ -543,7 +638,8 @@ class MainWindow(QMainWindow):
             success1, message1 = self.api_service.test_api_connection("first")
             
             dual_eval_checkbox = self.get_ui_element('dual_evaluation_enabled')
-            is_dual_active_ui = dual_eval_checkbox.isChecked() and dual_eval_checkbox.isEnabled()
+            is_dual_active_ui = (dual_eval_checkbox and isinstance(dual_eval_checkbox, QCheckBox) and
+                                 dual_eval_checkbox.isChecked() and dual_eval_checkbox.isEnabled())
 
             result_message = ""
             if is_dual_active_ui:
@@ -587,7 +683,7 @@ class MainWindow(QMainWindow):
             msg_box.setStandardButtons(QMessageBox.Ok)
             msg_box.exec_()
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         """窗口关闭事件（优化版）"""
         if self.worker.isRunning():
             self.worker.stop()
@@ -617,7 +713,8 @@ class MainWindow(QMainWindow):
         else:
             self.log_message("所有配置已在关闭前成功保存。")
 
-        event.accept()
+        if a0:
+            a0.accept()
 
     # --- 以下是其他未发生重大逻辑变化的函数，保持原样 ---
     # ... (包括 on_dual_evaluation_changed, _apply_ui_constraints, on_worker_finished, get_ui_element, 等等) ...
@@ -651,17 +748,17 @@ class MainWindow(QMainWindow):
                 dual_eval_checkbox.blockSignals(False)
             
             is_dual_active = dual_eval_checkbox.isChecked() and dual_eval_checkbox.isEnabled()
-            self.get_ui_element('score_diff_threshold').setEnabled(is_dual_active)
-            self.get_ui_element('second_api_url').setEnabled(is_dual_active)
-            self.get_ui_element('second_api_key').setEnabled(is_dual_active)
-            self.get_ui_element('second_modelID').setEnabled(is_dual_active)
+            self._safe_set_enabled('score_diff_threshold', is_dual_active)
+            self._safe_set_enabled('second_api_url', is_dual_active)
+            self._safe_set_enabled('second_api_key', is_dual_active)
+            self._safe_set_enabled('second_modelID', is_dual_active)
 
         q1_config = self.config_manager.get_question_config(1)
         is_q1_three_step_enabled = q1_config.get('enable_three_step_scoring', False)
 
-        # 支持8道题的依赖关系：题N只有在题1到题N-1都启用时才能启用
+        # 题目依赖关系：题N只有在题1到题N-1都启用时才能启用
         can_enable_next = True
-        for i in range(2, 9):  # 改为支持8道题
+        for i in range(2, self.max_questions + 1):
             cb_i = self.get_ui_element(f'enableQuestion{i}')
             if not cb_i: continue
             
@@ -706,10 +803,11 @@ class MainWindow(QMainWindow):
         
         # 获取选项卡实际数量，避免访问不存在的索引
         tab_count = tab_widget.count()
-        for i in range(1, tab_count + 1):
+        for i in range(1, min(tab_count, self.max_questions) + 1):
             q_config = self.config_manager.get_question_config(i)
             is_enabled = q_config.get('enabled', False) if i > 1 else True
-            status_icon = " ✓" if is_enabled else ""
+            # 用更醒目的启用标识（✅）替代不太显眼的 ✓
+            status_icon = " ✅" if is_enabled else ""
             tab_widget.setTabText(i - 1, f"题目{i}{status_icon}")
         
     def log_message(self, message, is_error=False, level=None):
@@ -754,8 +852,8 @@ class MainWindow(QMainWindow):
         self.update_ui_state(is_running=False)
         
     def update_ui_state(self, is_running):
-        self.get_ui_element('auto_run_but').setEnabled(not is_running)
-        self.get_ui_element('stop_but').setEnabled(is_running)
+        self._safe_set_enabled('auto_run_but', not is_running)
+        self._safe_set_enabled('stop_but', is_running)
         
         # 禁用所有配置相关控件
         config_controls = [
@@ -765,8 +863,8 @@ class MainWindow(QMainWindow):
             'cycle_number', 'wait_time', 'api_test_button',
             'baidu_ocr_api_key', 'baidu_ocr_secret_key'
         ]
-        # 支持8道题
-        for i in range(1, 9):
+        # 支持7道题
+        for i in range(1, self.max_questions + 1):
             config_controls.append(f'configQuestion{i}')
             config_controls.append(f'StandardAnswer_text_{i}')
             config_controls.append(f'score_rounding_step_{i}')
@@ -775,9 +873,7 @@ class MainWindow(QMainWindow):
             if i > 1: config_controls.append(f'enableQuestion{i}')
 
         for name in config_controls:
-            widget = self.get_ui_element(name)
-            if widget:
-                widget.setEnabled(not is_running)
+            self._safe_set_enabled(name, not is_running)
 
         if is_running:
             if not self.isMinimized(): self.showMinimized()
@@ -794,14 +890,57 @@ class MainWindow(QMainWindow):
 
     # ... 其他如 get_ui_element, open_question_config_dialog 等函数保持原样 ...
     # 您可以将原文件中的这些函数直接复制过来
-    def get_ui_element(self, element_name, element_type=None):
+    def get_ui_element(self, element_name: str, element_type=None) -> Optional[QWidget]:
+        """获取UI元素，支持类型提示
+        
+        Args:
+            element_name: 元素名称
+            element_type: 期望的元素类型（用于类型检查）
+            
+        Returns:
+            UI元素，如果找不到则返回None
+        """
         if element_name in self._ui_cache:
             return self._ui_cache[element_name]
         
-        element = self.findChild(QWidget, element_name)
+        element = cast(Optional[QWidget], self.findChild(QWidget, element_name))
         if element:
             self._ui_cache[element_name] = element
         return element
+    
+    def _safe_set_enabled(self, element_name: str, enabled: bool) -> None:
+        """安全地设置UI元素的enabled状态"""
+        element = self.get_ui_element(element_name)
+        if element:
+            element.setEnabled(enabled)
+    
+    def _safe_get_spinbox(self, element_name: str) -> Union[QSpinBox, None]:
+        """获取并强制转换为QSpinBox"""
+        element = self.get_ui_element(element_name)
+        if element and isinstance(element, QSpinBox):
+            return element
+        return None
+    
+    def _safe_get_checkbox(self, element_name: str) -> Union[QCheckBox, None]:
+        """获取并强制转换为QCheckBox"""
+        element = self.get_ui_element(element_name)
+        if element and isinstance(element, QCheckBox):
+            return element
+        return None
+    
+    def _safe_get_combobox(self, element_name: str) -> Union[QComboBox, None]:
+        """获取并强制转换为QComboBox"""
+        element = self.get_ui_element(element_name)
+        if element and isinstance(element, QComboBox):
+            return element
+        return None
+    
+    def _safe_get_lineedit(self, element_name: str) -> Union[QLineEdit, None]:
+        """获取并强制转换为QLineEdit"""
+        element = self.get_ui_element(element_name)
+        if element and isinstance(element, QLineEdit):
+            return element
+        return None
         
     def open_question_config_dialog(self, question_index):
         # 延迟导入以避免循环依赖
@@ -859,8 +998,8 @@ class MainWindow(QMainWindow):
     # 这些函数的内部逻辑基本不需要大改，因为它们大多是连接信号或设置简单的UI属性
     # 我在这里提供简化版，您可以与您的版本对比
     def connect_signals(self):
-        # 这个函数在 main.py 中被调用，这里留空，因为连接逻辑移到了 main.py 的 Application 类中
-        pass
+        """连接所有UI信号的公开接口"""
+        self._connect_signals()
 
     def setup_question_selector(self):
         # from PyQt5.QtWidgets import QButtonGroup
@@ -871,14 +1010,14 @@ class MainWindow(QMainWindow):
     def on_question_changed(self, button): pass
 
     def setup_text_fields(self):
-        # 支持8道题
-        for i in range(1, 9):
+        # 支持7道题
+        for i in range(1, self.max_questions + 1):
             widget = self.get_ui_element(f'StandardAnswer_text_{i}')
             if widget: widget.setPlaceholderText(f"请输入第{i}题的评分细则...")
 
-        # 设置评分细则和日志的字体大小为12pt
-        font = QFont("微软雅黑", 12)
-        for i in range(1, 9):
+        # 设置评分细则和日志的字体为微软雅黑，继承全局字号
+        font = QFont("微软雅黑")
+        for i in range(1, self.max_questions + 1):
             standard_answer_widget = self.get_ui_element(f'StandardAnswer_text_{i}')
             if standard_answer_widget:
                 standard_answer_widget.setFont(font)
@@ -928,32 +1067,40 @@ class MainWindow(QMainWindow):
     def on_subject_changed(self, index):
         # 此函数在我的重构中未直接使用，但如果您需要它，可以这样实现
         combo = self.sender()
-        if combo: self.handle_comboBox_save('subject', combo.currentText())
+        if combo and isinstance(combo, QComboBox): self.handle_comboBox_save('subject', combo.currentText())
 
     def _connect_signals(self):
         """统一连接所有UI控件的信号与槽"""
         # 连接按钮点击
-        self.get_ui_element('auto_run_but').clicked.connect(self.auto_run_but_clicked)
-        self.get_ui_element('stop_but').clicked.connect(self.stop_auto_thread)
-        self.get_ui_element('api_test_button').clicked.connect(self.test_api_connections)
+        auto_btn = self.get_ui_element('auto_run_but')
+        if auto_btn and isinstance(auto_btn, QPushButton):
+            auto_btn.clicked.connect(self.auto_run_but_clicked)
         
-        # 支持8道题的配置按钮
-        for i in range(1, 9):
+        stop_btn = self.get_ui_element('stop_but')
+        if stop_btn and isinstance(stop_btn, QPushButton):
+            stop_btn.clicked.connect(self.stop_auto_thread)
+        
+        test_btn = self.get_ui_element('api_test_button')
+        if test_btn and isinstance(test_btn, QPushButton):
+            test_btn.clicked.connect(self.test_api_connections)
+        
+        # 支持7道题的配置按钮
+        for i in range(1, self.max_questions + 1):
             btn = self.get_ui_element(f'configQuestion{i}')
-            if btn:
+            if btn and isinstance(btn, QPushButton):
                 btn.clicked.connect(lambda checked, q=i: self.open_question_config_dialog(q))
 
         # 连接即时保存信号
         self._connect_direct_edit_save_signals()
 
-        # 连接题目启用复选框（支持8道题）
-        for i in range(2, 9):
+        # 连接题目启用复选框（支持7道题）
+        for i in range(2, self.max_questions + 1):
             checkbox = self.get_ui_element(f'enableQuestion{i}')
             if checkbox:
                 checkbox.stateChanged.connect(self.on_question_enabled_changed)
         
         # 连接每题独立步长选择框的信号
-        for i in range(1, 9):
+        for i in range(1, self.max_questions + 1):
             step_combo = self.get_ui_element(f'score_rounding_step_{i}', QComboBox)
             if step_combo:
                 step_combo.currentTextChanged.connect(
@@ -961,7 +1108,7 @@ class MainWindow(QMainWindow):
                 )
         
         # 连接每题独立OCR模式选择框的信号
-        for i in range(1, 9):
+        for i in range(1, self.max_questions + 1):
             ocr_mode_combo = self.get_ui_element(f'ocr_mode_{i}', QComboBox)
             if ocr_mode_combo:
                 ocr_mode_combo.currentIndexChanged.connect(
@@ -969,7 +1116,7 @@ class MainWindow(QMainWindow):
                 )
         
         # 连接每题独立OCR精度选择框的信号
-        for i in range(1, 9):
+        for i in range(1, self.max_questions + 1):
             ocr_quality_combo = self.get_ui_element(f'ocr_quality_{i}', QComboBox)
             if ocr_quality_combo:
                 ocr_quality_combo.currentTextChanged.connect(
@@ -994,7 +1141,7 @@ class MainWindow(QMainWindow):
         self.config_manager.update_question_config(question_index, 'ocr_mode_index', mode_index)
         
         # 保存配置到文件
-        self.save_all_configs_to_file()
+        self.config_manager.save_all_configs_to_file()
         
         # 更新精度下拉框的可用性：只有选择百度OCR时才启用
         is_baidu_ocr = (mode_index == 1)
@@ -1019,3 +1166,4 @@ class MainWindow(QMainWindow):
 
 
 # --- END OF FILE main_window.py ---
+

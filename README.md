@@ -63,10 +63,15 @@
     在安装过程中，请确保勾选“Add Python to PATH”选项。
 
 2.  **安装依赖库**：
-    打开命令行工具（如 `cmd` 或 `PowerShell`），切换到项目根目录，然后运行以下命令安装所有必需的Python库：
+    推荐使用 `requirements.txt`（仓库暂无自动生成的 `requirements.txt` 时可手动创建），或直接运行下面的安装命令安装常用和功能完整的依赖：
     ```bash
-    pip install PyQt5 requests pyautogui Pillow
+    pip install PyQt5 requests pyautogui Pillow appdirs pandas openpyxl numpy opencv-python
     ```
+    **最小可运行依赖（避免启动即崩溃）**：如果暂时只想保证能启动并使用配置/保存功能，请至少安装：
+    ```bash
+    pip install appdirs pandas openpyxl
+    ```
+    说明：如果未安装 `pandas`，程序在启动时会在导入 `pandas` 的位置直接抛出 ImportError 并导致程序崩溃；若不安装某些可选组件，相关功能（如写 Excel、图像处理或屏幕录制）将不可用或报错。
 
 ### 运行程序
 

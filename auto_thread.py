@@ -138,7 +138,7 @@ class GradingThread(QThread):
         subject_from_config = None
         if self.config_manager:
             try:
-                subject_from_config = self.config_manager.get_setting('subject')
+                subject_from_config = getattr(self.config_manager, 'subject', None)
             except Exception:
                 pass
         

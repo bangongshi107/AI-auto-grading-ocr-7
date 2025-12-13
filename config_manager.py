@@ -73,7 +73,7 @@ class ConfigManager:
             "baidu_ocr": self.OCR_MODE_BAIDU_OCR,
         }
 
-        self.max_questions = 8
+        self.max_questions = 7
         self._init_default_config()
         self.load_config()
         ConfigManager._initialized = True
@@ -158,10 +158,19 @@ class ConfigManager:
     def _safe_load_config(self):
         """安全地加载配置，缺失项使用默认值"""
         # --- CHANGED: 加载 provider 而不是 url ---
-        self.first_api_provider = self._get_config_safe('API', 'first_api_provider', "volcengine")
+        # 兼容旧/错误配置：允许 provider 字段写入 UI 文本（如“火山引擎 (推荐)”），自动映射为内部 provider_id（如 volcengine）。
+        self.first_api_provider = self._normalize_ai_provider_value(
+            self._get_config_safe('API', 'first_api_provider', "volcengine"),
+            default_provider_id="volcengine",
+            field_label="first_api_provider",
+        )
         self.first_api_key = self._get_config_safe('API', 'first_api_key', "")
         self.first_modelID = self._get_config_safe('API', 'first_modelID', "")
-        self.second_api_provider = self._get_config_safe('API', 'second_api_provider', "moonshot")
+        self.second_api_provider = self._normalize_ai_provider_value(
+            self._get_config_safe('API', 'second_api_provider', "moonshot"),
+            default_provider_id="moonshot",
+            field_label="second_api_provider",
+        )
         self.second_api_key = self._get_config_safe('API', 'second_api_key', "")
         self.second_modelID = self._get_config_safe('API', 'second_modelID', "")
         
@@ -188,6 +197,7 @@ class ConfigManager:
         self.ocr_confidence_avg_threshold = float(self._get_config_safe('OCR', 'ocr_confidence_avg_threshold', self.ocr_confidence_avg_threshold))
         self.ocr_confidence_min_threshold = float(self._get_config_safe('OCR', 'ocr_confidence_min_threshold', self.ocr_confidence_min_threshold))
         self.ocr_confidence_low_line_ratio = float(self._get_config_safe('OCR', 'ocr_confidence_low_line_ratio', self.ocr_confidence_low_line_ratio))
+        # 不再从配置文件读取/写入 UI 字号与字体族（移除用户自行调整字号的设定）
         
         for i in range(1, self.max_questions + 1):
             section_name = f'Question{i}'
@@ -221,6 +231,43 @@ class ConfigManager:
         # 强制确保第一题始终启用
         if '1' in self.question_configs:
             self.question_configs['1']['enabled'] = True
+
+    def _normalize_ai_provider_value(self, raw_value, default_provider_id: str, field_label: str) -> str:
+        """将配置中的供应商字段标准化为内部 provider_id。
+
+        兼容输入：
+        - 内部ID：volcengine / moonshot / ...
+        - UI文本：火山引擎 (推荐) / 月之暗面 / ...
+        """
+        if raw_value is None:
+            return default_provider_id
+
+        value = str(raw_value).strip()
+        if not value:
+            return default_provider_id
+
+        # 延迟导入，避免潜在循环依赖与启动开销
+        try:
+            from api_service import PROVIDER_CONFIGS, get_provider_id_from_ui_text
+        except Exception:
+            # 如果映射不可用，至少返回原始值（后续由ApiService再兜底）
+            return value
+
+        # 已经是内部ID
+        if value in PROVIDER_CONFIGS:
+            return value
+
+        # 尝试从 UI 文本映射回内部ID
+        provider_id = get_provider_id_from_ui_text(value)
+        if provider_id:
+            return provider_id
+
+        # 未知值：保留原值，方便UI显示用户填写的内容，但后续需要UI校验阻止启动
+        try:
+            print(f"[ConfigManager] 未识别的AI供应商配置({field_label}): {value}")
+        except Exception:
+            pass
+        return value
 
     def _get_config_safe(self, section, option, default_value, value_type: type = str):
         """安全地获取配置值"""

@@ -28,14 +28,170 @@
     <height>970</height>
    </size>
   </property>
-  <property name="font">
-   <font>
-    <family>微软雅黑</family>
-    <pointsize>10</pointsize>
-   </font>
-  </property>
   <property name="windowTitle">
-   <string>AI智能阅卷助手 - 多题模式</string>
+   <string>AI智能阅卷助手 - 科技改变世界</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">/* 极淡蓝色整体风格（不改布局，只做视觉微调） */
+QMainWindow,
+QWidget#centralwidget,
+QWidget#scrollAreaWidgetContents {
+    background-color: #E6F1FF;
+}
+
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+QGroupBox {
+    background-color: rgba(255, 255, 255, 235);
+    border: 1px solid #BFD8FF;
+    border-radius: 6px;
+    margin-top: 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 6px;
+    color: #2B4A66;
+}
+
+QLabel {
+    color: #1F2D3D;
+}
+
+QLineEdit,
+QPlainTextEdit,
+QTextEdit,
+QSpinBox,
+QComboBox {
+    background-color: #FFFFFF;
+    border: 1px solid #BFD8FF;
+    border-left: 3px solid #7FB0FF;
+    border-right: 3px solid #7FB0FF;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+
+QLineEdit:focus,
+QPlainTextEdit:focus,
+QTextEdit:focus,
+QSpinBox:focus,
+QComboBox:focus {
+    border-color: #7FB0FF;
+}
+
+/* 只读/不可编辑：用偏灰蓝底 + 更弱文字/边框，和可输入控件明显区分 */
+QLineEdit[readOnly="true"],
+QPlainTextEdit[readOnly="true"],
+QTextEdit[readOnly="true"] {
+    background-color: #F2F7FF;
+    color: #5E6F80;
+    border: 1px dashed #AFCBFF;
+}
+
+QLineEdit[readOnly="true"]:hover,
+QPlainTextEdit[readOnly="true"]:hover,
+QTextEdit[readOnly="true"]:hover,
+QLineEdit[readOnly="true"]:focus,
+QPlainTextEdit[readOnly="true"]:focus,
+QTextEdit[readOnly="true"]:focus {
+    background-color: #F2F7FF;
+    color: #5E6F80;
+    border: 1px dashed #AFCBFF;
+}
+
+/* 完全不可用（disabled）：进一步变淡，提示“当前不可操作/不可输入” */
+QLineEdit:disabled,
+QPlainTextEdit:disabled,
+QTextEdit:disabled,
+QSpinBox:disabled,
+QComboBox:disabled {
+    background-color: #F3F6FA;
+    color: #7B8DA0;
+    border: 1px solid #D7E3F2;
+}
+
+QPushButton,
+QToolButton {
+    color: #0B2A44;
+    font-weight: 600;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #EAF5FF,
+                                stop:1 #B9DCFF);
+    border: 1px solid #4F95FF;
+    border-bottom: 2px solid #3F8CFF;
+    border-radius: 6px;
+    padding: 7px 12px;
+    min-height: 28px;
+}
+
+QPushButton:hover,
+QToolButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #F3FAFF,
+                                stop:1 #C7E3FF);
+    border-color: #3F8CFF;
+    border-bottom-color: #2F7FFF;
+}
+
+QPushButton:pressed,
+QToolButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #A8D0FF,
+                                stop:1 #C0E0FF);
+    border-color: #2F7FFF;
+    border-bottom-color: #2F7FFF;
+}
+
+QPushButton:focus,
+QToolButton:focus {
+    border-color: #3F8CFF;
+}
+
+QPushButton:disabled,
+QToolButton:disabled {
+    color: #7B8DA0;
+    background-color: #F4F7FB;
+    border-color: #D7E3F2;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #BFD8FF;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #BFD8FF;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0px;
+}</string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <property name="sizePolicy">
@@ -97,8 +253,8 @@
         <rect>
          <x>0</x>
          <y>0</y>
-         <width>798</width>
-         <height>968</height>
+         <width>800</width>
+         <height>970</height>
         </rect>
        </property>
        <property name="sizePolicy">
@@ -353,7 +509,7 @@
            </widget>
           </item>
           <item>
-           <widget class="QLabel" name="label_14">
+           <widget class="QLabel" name="label_15_q8_2">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
               <horstretch>0</horstretch>
@@ -361,7 +517,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>分差内提交平均分；分差超出设置则阅卷停止   </string>
+             <string>分差内提交均分；超出停止阅卷           </string>
             </property>
            </widget>
           </item>
@@ -490,7 +646,7 @@
           </property>
           <widget class="QWidget" name="tab_question1">
            <attribute name="title">
-            <string>题目1 ✓</string>
+            <string>题目1 ✅</string>
            </attribute>
            <layout class="QVBoxLayout" name="verticalLayout_q1">
             <property name="spacing">
@@ -569,7 +725,7 @@
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  </string>
+                 <string/>
                 </property>
                </widget>
               </item>
@@ -608,7 +764,7 @@
                  </sizepolicy>
                 </property>
                 <property name="text">
-                 <string>  文字识别精度:</string>
+                 <string>文字识别精度</string>
                 </property>
                </widget>
               </item>
@@ -670,7 +826,7 @@
               <item>
                <widget class="QCheckBox" name="enableQuestion2">
                 <property name="text">
-                 <string>启用本题</string>
+                 <string>启用2题</string>
                 </property>
                </widget>
               </item>
@@ -721,19 +877,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q2">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_2">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -757,6 +900,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q2">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -817,7 +973,7 @@
               <item>
                <widget class="QCheckBox" name="enableQuestion3">
                 <property name="text">
-                 <string>启用本题</string>
+                 <string>启用3题</string>
                 </property>
                </widget>
               </item>
@@ -868,19 +1024,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q3">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_3">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -904,6 +1047,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q3">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -964,7 +1120,7 @@
               <item>
                <widget class="QCheckBox" name="enableQuestion4">
                 <property name="text">
-                 <string>启用本题</string>
+                 <string>启用4题</string>
                 </property>
                </widget>
               </item>
@@ -1015,19 +1171,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q4">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_4">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1051,6 +1194,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q4">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -1111,7 +1267,7 @@
               <item>
                <widget class="QCheckBox" name="enableQuestion5">
                 <property name="text">
-                 <string>启用本题</string>
+                 <string>启用5题</string>
                 </property>
                </widget>
               </item>
@@ -1162,19 +1318,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q5">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_5">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1198,6 +1341,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q5">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -1258,7 +1414,7 @@
               <item>
                <widget class="QCheckBox" name="enableQuestion6">
                 <property name="text">
-                 <string>启用本题</string>
+                 <string>启用6题</string>
                 </property>
                </widget>
               </item>
@@ -1309,19 +1465,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q6">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_6">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1345,6 +1488,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q6">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -1405,7 +1561,7 @@
               <item>
                <widget class="QCheckBox" name="enableQuestion7">
                 <property name="text">
-                 <string>启用本题</string>
+                 <string>启用7题</string>
                 </property>
                </widget>
               </item>
@@ -1456,19 +1612,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q7">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_7">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1492,6 +1635,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q7">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -1603,19 +1759,6 @@
                </widget>
               </item>
               <item>
-               <widget class="QLabel" name="label_15_q8">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
-                </property>
-                <property name="text">
-                 <string>  </string>
-                </property>
-               </widget>
-              </item>
-              <item>
                <widget class="QComboBox" name="ocr_mode_8">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -1639,6 +1782,19 @@
                   <string>百度OCR识别文字+AI评阅</string>
                  </property>
                 </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_15_q8">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>文字识别精度</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -1819,7 +1975,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>    自动改卷份数</string>
+             <string> 自动改卷份数</string>
             </property>
            </widget>
           </item>
@@ -1842,7 +1998,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>    翻页后等待（秒）</string>
+             <string> 翻页后等待（秒）</string>
             </property>
            </widget>
           </item>

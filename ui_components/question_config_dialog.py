@@ -1,11 +1,12 @@
 # --- START OF FILE question_config_dialog.py (Corrected) ---
 
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+from typing import Optional, Any
+from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                             QLineEdit, QPushButton, QCheckBox, QGroupBox,
                             QComboBox, QTextEdit, QSpinBox, QMessageBox,
                             QMainWindow, QWidget)
 from PyQt5.QtCore import Qt, QPoint, QRect, pyqtSignal, QTimer
-from PyQt5.QtGui import QPainter, QColor, QPen, QFont
+from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QPaintEvent, QCloseEvent, QShowEvent
 import pyautogui
 import time
 
@@ -17,11 +18,18 @@ class MyWindow2(QMainWindow):
     
     def update_ui_state(self, is_running):
         """代理方法，转发到主窗口"""
-        if self.parent and hasattr(self.parent, 'update_ui_state'):
-            self.parent.update_ui_state(is_running)
+        parent_window = self.parent()
+        if parent_window is not None and hasattr(parent_window, 'update_ui_state'):
+            parent_window.update_ui_state(is_running)  # type: ignore
     
     def __init__(self, parent=None, question_index=None):
         super(MyWindow2, self).__init__(parent)
+
+        # 固定答案框窗口字号为 10（与题目配置信息界面一致）
+        try:
+            self.setFont(QFont("微软雅黑", 10))
+        except Exception:
+            pass
 
         self.question_index = question_index
 
@@ -31,10 +39,10 @@ class MyWindow2(QMainWindow):
         self.resize(400, 300)
 
         # 设置窗口样式 - 无边框、工具窗口（移除WindowStaysOnTopHint，避免与父窗口冲突）
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)  # type: ignore
         
         # 设置窗口属性为透明背景
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground)  # type: ignore
         
         # 创建中央窗口部件
         central_widget = QWidget(self)
@@ -57,14 +65,17 @@ class MyWindow2(QMainWindow):
         pass
         
         print(f"第{question_index}题答案框窗口已创建" if question_index else "答案框窗口已创建")
-        if self.parent and hasattr(self.parent, 'log_message'):
-            self.parent.log_message(f"第{question_index}题答案框窗口已创建" if question_index else "答案框窗口已创建")
+        parent_window = self.parent()
+        if parent_window is not None and hasattr(parent_window, 'log_message'):
+            parent_window.log_message(f"第{question_index}题答案框窗口已创建" if question_index else "答案框窗口已创建")  # type: ignore
     
     def set_confirmed_mode(self):
         """设置为已确认模式，更改提示文字和透明度"""
         self.is_confirmed = True
         # 增加透明度，使窗口更不明显但仍然可见
-        self.centralWidget().setStyleSheet("background-color: rgba(200, 200, 255, 15);")
+        widget = self.centralWidget()
+        if widget is not None:
+            widget.setStyleSheet("background-color: rgba(200, 200, 255, 15);")
         # 自动锁定窗口
         self.is_locked = True
         # 发送状态变化信号
@@ -75,8 +86,9 @@ class MyWindow2(QMainWindow):
         """设置为编辑模式，允许调整位置和大小"""
         log_msg_start = "正在设置答案框为编辑模式..."
         print(log_msg_start) # 保留 print 语句
-        if self.parent and hasattr(self.parent, 'log_message'):
-            self.parent.log_message(log_msg_start)
+        parent_window = self.parent()
+        if parent_window is not None and hasattr(parent_window, 'log_message'):
+            parent_window.log_message(log_msg_start)  # type: ignore
         
         # 彻底重置所有锁定状态
         self.is_confirmed = False
@@ -85,14 +97,16 @@ class MyWindow2(QMainWindow):
         self.resize_edge = None
         
         # 恢复原来的透明度
-        self.centralWidget().setStyleSheet("background-color: rgba(200, 200, 255, 30);")
+        widget = self.centralWidget()
+        if widget is not None:
+            widget.setStyleSheet("background-color: rgba(200, 200, 255, 30);")
+            # 确保鼠标追踪已启用
+            widget.setMouseTracking(True)
         
-        # 确保鼠标追踪已启用
         self.setMouseTracking(True)
-        self.centralWidget().setMouseTracking(True)
         
         # 重置光标为默认
-        self.setCursor(Qt.ArrowCursor)
+        self.setCursor(Qt.ArrowCursor)  # type: ignore
         
         # 发送状态变化信号
         self.status_changed.emit("editing")
@@ -102,10 +116,11 @@ class MyWindow2(QMainWindow):
         
         # 验证状态是否正确设置
         print(f"编辑模式设置完成 - 锁定状态: {self.is_locked}, 确认状态: {self.is_confirmed}")
-        if self.parent and hasattr(self.parent, 'log_message'):
-            self.parent.log_message(f"编辑模式设置完成 - 锁定状态: {self.is_locked}, 确认状态: {self.is_confirmed}")
+        parent_window = self.parent()
+        if parent_window is not None and hasattr(parent_window, 'log_message'):
+            parent_window.log_message(f"编辑模式设置完成 - 锁定状态: {self.is_locked}, 确认状态: {self.is_confirmed}")  # type: ignore
     
-    def paintEvent(self, event):
+    def paintEvent(self, a0: Optional[QPaintEvent]) -> None:
         """绘制窗口边框和提示文字"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -115,7 +130,14 @@ class MyWindow2(QMainWindow):
         painter.setPen(pen)
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
         
-        font = QFont("微软雅黑", 10)
+        font = QFont("微软雅黑")
+        # 让提示文字跟随本窗口字号（题目配置相关界面固定为 10）
+        try:
+            base_font = self.font()
+            if base_font and base_font.pointSize() > 0:
+                font.setPointSize(base_font.pointSize())
+        except Exception:
+            pass
         font.setBold(True)
         painter.setFont(font)
         
@@ -138,16 +160,19 @@ class MyWindow2(QMainWindow):
         combined_x = (self.width() - combined_width) // 2
         painter.drawText(combined_x, 17, combined_text)
     
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, a0: Optional[QMouseEvent]) -> None:
         """鼠标按下事件，用于移动窗口或调整大小"""
         # 如果窗口已锁定，则忽略鼠标事件
         if self.is_locked:
             return
+        
+        if a0 is None:
+            return
             
-        if event.button() == Qt.LeftButton:
+        if a0.button() == Qt.LeftButton:  # type: ignore
             # 检查是否在边缘
             rect = self.rect()
-            pos = event.pos()
+            pos = a0.pos()
             
             # 检测边缘区域
             left_edge = pos.x() <= self.border_width
@@ -163,21 +188,24 @@ class MyWindow2(QMainWindow):
                     'top': top_edge,
                     'bottom': bottom_edge
                 }
-                event.accept()
+                a0.accept()
             else:
                 # 如果不在边缘，则为拖动窗口
-                self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-                event.accept()
+                self.drag_position = a0.globalPos() - self.frameGeometry().topLeft()
+                a0.accept()
     
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, a0: Optional[QMouseEvent]) -> None:
         """鼠标移动事件，用于移动窗口或调整大小"""
         # 如果窗口已锁定，则只更新光标形状为默认
         if self.is_locked:
-            self.setCursor(Qt.ArrowCursor)
+            self.setCursor(Qt.ArrowCursor)  # type: ignore
+            return
+        
+        if a0 is None:
             return
             
         # 获取鼠标位置
-        pos = event.pos()
+        pos = a0.pos()
         rect = self.rect()
         
         # 检测边缘区域
@@ -188,40 +216,40 @@ class MyWindow2(QMainWindow):
         
         # 根据鼠标位置更新光标形状
         if (left_edge and top_edge) or (right_edge and bottom_edge):
-            self.setCursor(Qt.SizeFDiagCursor)  # 左上-右下调整
+            self.setCursor(Qt.SizeFDiagCursor)  # type: ignore  # 左上-右下调整
         elif (right_edge and top_edge) or (left_edge and bottom_edge):
-            self.setCursor(Qt.SizeBDiagCursor)  # 右上-左下调整
+            self.setCursor(Qt.SizeBDiagCursor)  # type: ignore  # 右上-左下调整
         elif left_edge or right_edge:
-            self.setCursor(Qt.SizeHorCursor)    # 水平调整
+            self.setCursor(Qt.SizeHorCursor)  # type: ignore    # 水平调整
         elif top_edge or bottom_edge:
-            self.setCursor(Qt.SizeVerCursor)    # 垂直调整
+            self.setCursor(Qt.SizeVerCursor)  # type: ignore    # 垂直调整
         else:
-            self.setCursor(Qt.ArrowCursor)      # 默认光标
+            self.setCursor(Qt.ArrowCursor)  # type: ignore      # 默认光标
         
         # 处理拖动和调整大小
-        if self.resizing and event.buttons() & Qt.LeftButton:
+        if self.resizing and a0.buttons() & Qt.LeftButton and self.resize_edge:  # type: ignore
             # 调整大小
-            global_pos = event.globalPos()
+            global_pos = a0.globalPos()
             rect = self.geometry()
             new_rect = QRect(rect)
             
-            if self.resize_edge['left']:
+            if self.resize_edge.get('left'):  # type: ignore
                 # 调整左边缘
                 width_diff = rect.left() - global_pos.x()
                 if rect.width() + width_diff >= 50:  # 最小宽度限制
                     new_rect.setLeft(global_pos.x())
             
-            if self.resize_edge['right']:
+            if self.resize_edge.get('right'):  # type: ignore
                 # 调整右边缘
                 new_rect.setRight(global_pos.x())
             
-            if self.resize_edge['top']:
+            if self.resize_edge.get('top'):  # type: ignore
                 # 调整上边缘
                 height_diff = rect.top() - global_pos.y()
                 if rect.height() + height_diff >= 50:  # 最小高度限制
                     new_rect.setTop(global_pos.y())
             
-            if self.resize_edge['bottom']:
+            if self.resize_edge.get('bottom'):  # type: ignore
                 # 调整下边缘
                 new_rect.setBottom(global_pos.y())
             
@@ -229,80 +257,118 @@ class MyWindow2(QMainWindow):
             if new_rect.width() >= 50 and new_rect.height() >= 50:
                 self.setGeometry(new_rect)
             
-            event.accept()
+            a0.accept()
         
-        elif event.buttons() == Qt.LeftButton and not self.resizing:
+        elif a0.buttons() == Qt.LeftButton and not self.resizing:  # type: ignore
             # 移动窗口
-            self.move(event.globalPos() - self.drag_position)
-            event.accept()
+            self.move(a0.globalPos() - self.drag_position)
+            a0.accept()
     
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, a0: Optional[QMouseEvent]) -> None:
         """鼠标释放事件"""
-        if event.button() == Qt.LeftButton:
+        if a0 and a0.button() == Qt.LeftButton:  # type: ignore
             self.resizing = False
             self.resize_edge = None
-            event.accept()
+            a0.accept()
     
-    def showEvent(self, event):
+    def showEvent(self, a0: Optional[QShowEvent]) -> None:
         """窗口显示事件"""
-        super().showEvent(event)
+        if a0 is not None:
+            super().showEvent(a0)
         # 窗口显示时，设置为编辑模式
         self.set_edit_mode()
         print("答案框窗口显示事件触发")
-        if self.parent and hasattr(self.parent, 'log_message'):
-            self.parent.log_message("答案框窗口显示事件触发")
+        parent_window = self.parent()
+        if parent_window is not None and hasattr(parent_window, 'log_message'):
+            parent_window.log_message("答案框窗口显示事件触发")  # type: ignore
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         """窗口关闭事件"""
         print("答案框窗口关闭事件触发")
-        if self.parent and hasattr(self.parent, 'log_message'):
-            self.parent.log_message("答案框窗口关闭事件触发")
+        parent_window = self.parent()
+        if parent_window is not None and hasattr(parent_window, 'log_message'):
+            parent_window.log_message("答案框窗口关闭事件触发")  # type: ignore
         # 发送窗口关闭信号
         self.status_changed.emit("closed")
-        event.accept()
+        if a0 is not None:
+            a0.accept()
 
 class QuestionConfigDialog(QDialog):
     """题目配置对话框，用于配置每个题目的评分参数"""
     config_updated = pyqtSignal() # 添加信号
     
-    def __init__(self, parent=None, config_manager=None, question_index=1, is_single_q1_mode_active=False):
+    def __init__(self, parent: Optional[Any] = None, config_manager: Optional[Any] = None, question_index: int = 1, is_single_q1_mode_active: bool = False):
         super().__init__(parent)
         
         # 设置为非模态对话框，允许同时编辑其他窗口
         self.setModal(False)
         
-        self.parent = parent
-        self.config_manager = config_manager
-        self.question_index = question_index
-        self.is_single_q1_mode_active = is_single_q1_mode_active
+        # ✨ 设置此对话框的全局字体大小为 10（覆盖应用全局的 11）
+        # 便于未来调整，只需修改下面的 10 即可
+        self._apply_font_size(font_size=10)
+        
+        self.parent_window: Optional[Any] = parent
+        self.config_manager: Optional[Any] = config_manager
+        self.question_index: int = question_index
+        self.is_single_q1_mode_active: bool = is_single_q1_mode_active
         
         # 获取当前题目配置
-        self.question_config = self.config_manager.get_question_config(question_index) if config_manager else {} # 确保 q_config 是字典
+        self.question_config: dict = self.config_manager.get_question_config(question_index) if self.config_manager else {}  # 确保 q_config 是字典
 
         # 新增三步打分相关UI元素（仅第一题使用）
-        self.three_step_scoring_checkbox = None
-        self.score_input_group_step1 = None # QGroupBox for step1
-        self.score_x_edit_step1 = None
-        self.score_y_edit_step1 = None
-        self.set_pos_button_step1 = None
+        self.three_step_scoring_checkbox: Optional[QCheckBox] = None
+        self.score_input_group_step1: Optional[QGroupBox] = None # QGroupBox for step1
+        self.score_x_edit_step1: Optional[QSpinBox] = None
+        self.score_y_edit_step1: Optional[QSpinBox] = None
+        self.set_pos_button_step1: Optional[QPushButton] = None
         # ... (为 step2 和 step3 添加类似的变量)
-        self.score_input_group_step2 = None
-        self.score_x_edit_step2 = None
-        self.score_y_edit_step2 = None
-        self.set_pos_button_step2 = None
-        self.score_input_group_step3 = None
-        self.score_x_edit_step3 = None
-        self.score_y_edit_step3 = None
-        self.set_pos_button_step3 = None
+        self.score_input_group_step2: Optional[QGroupBox] = None
+        self.score_x_edit_step2: Optional[QSpinBox] = None
+        self.score_y_edit_step2: Optional[QSpinBox] = None
+        self.set_pos_button_step2: Optional[QPushButton] = None
+        self.score_input_group_step3: Optional[QGroupBox] = None
+        self.score_x_edit_step3: Optional[QSpinBox] = None
+        self.score_y_edit_step3: Optional[QSpinBox] = None
+        self.set_pos_button_step3: Optional[QPushButton] = None
 
         # 原有的单点分数输入组也需要一个引用，方便控制其启用/禁用
-        self.original_score_input_group = None
-        self.question_type_combo = None # 新增题目类型下拉框成员变量
+        self.original_score_input_group: Optional[QGroupBox] = None
+        self.question_type_combo: Optional[QComboBox] = None # 新增题目类型下拉框成员变量
 
         # 在 self.init_ui() 之前添加
-        self.position_capture_timer = None
+        self.position_capture_timer: Optional[QTimer] = None
 
         self.init_ui()
+
+    def _apply_font_size(self, font_size: int = 10) -> None:
+        """
+        为此对话框及其所有子控件统一应用字体大小。
+        
+        通过 QSS 强制覆盖应用全局字体大小设置，便于未来调整维护。
+        只需修改此方法的参数即可全局改变对话框字号。
+        
+        Args:
+            font_size: 字体大小（单位：磅），默认为 10
+        """
+        font = QFont("微软雅黑", font_size)
+        self.setFont(font)
+        # 通过样式表确保所有子控件都使用相同字号，覆盖应用全局设置
+        self.setStyleSheet(f"""
+            QDialog, QDialog * {{
+                font-size: {font_size}pt;
+                font-family: '微软雅黑';
+            }}
+        """)
+
+    def _log_message(self, message: str, is_error: bool = False) -> None:
+        """Helper method to safely log messages to parent window"""
+        if self.parent_window and hasattr(self.parent_window, 'log_message'):
+            self.parent_window.log_message(message, is_error=is_error)  # type: ignore
+        else:
+            if is_error:
+                print(f"ERROR: {message}")
+            else:
+                print(message)
 
         # 初始化UI
     def init_ui(self):
@@ -310,19 +376,15 @@ class QuestionConfigDialog(QDialog):
         self.setWindowTitle(f'配置第{self.question_index}题')
         # --- CRITICAL FIX: 移除 Qt.WindowStaysOnTopHint ---
         # 移除这个标志，以避免它遮挡新弹出的答案框选窗口
-        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint)  # type: ignore
         self.resize(400, 500) # 恢复用户指定的固定大小
-
-        # 设置对话框的默认字体
-        font = QFont("微软雅黑", 10)
-        self.setFont(font)
         
         # 主布局
         main_layout = QVBoxLayout()
         main_layout.setSpacing(0) # 设置主布局中各组件的垂直间距为0像素
         
         # --- 1. 分数设置组 ---
-        score_group = QGroupBox("注意：本软件固定步长0.5，请确保阅卷网站步长已设为0.5")
+        score_group = QGroupBox("设置此题给分上下限。注意，可以不是满分零分")
         score_group_content_layout = QHBoxLayout() 
         
         score_group_content_layout.addWidget(QLabel("打分上限:"))
@@ -415,12 +477,18 @@ class QuestionConfigDialog(QDialog):
             )
             three_step_group_main_layout.addWidget(self.score_input_group_step3)
 
+            # 初始化时，三个位置输入组默认隐藏（未启用三步打分时）
+            self.score_input_group_step1.setVisible(False)
+            self.score_input_group_step2.setVisible(False)
+            self.score_input_group_step3.setVisible(False)
+
             if not self.is_single_q1_mode_active:
                 self.three_step_scoring_checkbox.setChecked(False)
                 self.three_step_scoring_checkbox.setEnabled(False)
 
             # 确保在所有相关UI元素创建并赋值后调用
-            self.toggle_three_step_mode_ui(enable_three_step_from_config)
+            if enable_three_step_from_config:
+                self.toggle_three_step_mode_ui(True)
 
             three_step_group.setLayout(three_step_group_main_layout)
             
@@ -437,7 +505,7 @@ class QuestionConfigDialog(QDialog):
 
 
         # --- 4. 提交按钮位置设置 ---
-        submit_group = QGroupBox("提交按钮位置设置")
+        submit_group = QGroupBox("")
         submit_group_content_layout = QHBoxLayout() 
         
         submit_group_content_layout.addWidget(QLabel("坐标:"))
@@ -565,7 +633,7 @@ class QuestionConfigDialog(QDialog):
     def _create_position_input_group(self, title, x_edit_attr, y_edit_attr, button_attr, pos_name):
         """辅助函数：创建一个用于设置坐标的位置输入UI组。"""
         # 创建UI组件
-        group_box = QGroupBox("") # 组的标题由外部QLabel提供，保持UI一致性
+        group_box = QGroupBox("")  # 组的标题由外部QLabel提供，保持UI一致性
         layout = QHBoxLayout()
         
         x_edit = QLineEdit()
@@ -586,13 +654,16 @@ class QuestionConfigDialog(QDialog):
         group_box.setLayout(layout)
 
         # 从配置加载初始值
-        # 注意：这里的逻辑依赖于config中key的命名与属性名的某种关联
-        # 例如 x_edit_attr = 'score_x_edit_step1' 对应 config key 'score_input_pos_step1'
-        config_key = f"score_input_pos_{pos_name.split(' ')[-1]}" # 从 '位置 1' 中提取 '1'
-        if pos_name == "分数输入": # 特殊处理默认的分数输入组
+        # 处理不同的位置输入组
+        if pos_name == "分数输入":
             config_key = "score_input_pos"
+        elif "位置" in pos_name:  # 例如 "位置 1"、"位置 2"、"位置 3"
+            step_num = pos_name.split()[-1]  # 提取"1"、"2"或"3"
+            config_key = f"score_input_pos_step{step_num}"
+        else:
+            config_key = f"score_input_pos_{pos_name}"
             
-        pos_val = self.question_config.get(config_key)
+        pos_val = self.question_config.get(config_key) if self.question_config else None
         pos_x, pos_y = pos_val if pos_val is not None else (0, 0)
         x_edit.setText(str(pos_x))
         y_edit.setText(str(pos_y))
@@ -612,15 +683,18 @@ class QuestionConfigDialog(QDialog):
     def start_answer_area_selection(self):
         """开始框定答案区域"""
         try:
+            if not self.parent_window:
+                raise Exception("无法获取父窗口对象")
+            
             # 获取当前题目的专用答案框窗口
-            answer_window = self.parent.get_or_create_answer_window(self.question_index)
+            answer_window = self.parent_window.get_or_create_answer_window(self.question_index)  # type: ignore
 
             # 确保答案框是配置框的子窗口，并设置适当的窗口关系
             if answer_window.parent() != self:
                 # 如果不是子窗口，设置为子窗口
-                answer_window.setParent(self, Qt.Window)
+                answer_window.setParent(self, Qt.Window)  # type: ignore
                 # 重新设置窗口标志，确保没有置顶冲突
-                answer_window.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
+                answer_window.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)  # type: ignore
 
             # 显示窗口并确保其可见性
             answer_window.show()
@@ -629,17 +703,21 @@ class QuestionConfigDialog(QDialog):
             # 使用QTimer延迟执行，确保窗口完全显示后再提升
             QTimer.singleShot(100, lambda: self._ensure_answer_window_visible(answer_window))
 
-            self.parent.log_message(f"请调整第{self.question_index}题的答案框位置和大小")
+            self._log_message(f"请调整第{self.question_index}题的答案框位置和大小")
 
             # 更新按钮状态
-            self.set_answer_button.clicked.disconnect()
+            try:
+                self.set_answer_button.clicked.disconnect()
+            except TypeError:
+                # 可能尚未连接任何槽，忽略
+                pass
             self.set_answer_button.clicked.connect(
                 lambda: self.confirm_answer_area_selection(answer_window)
             )
             self.set_answer_button.setText("确认框定")
             self.set_answer_button.setStyleSheet("background-color: #FF5555; color: white; font-weight: bold;")
         except Exception as e:
-            self.parent.log_message(f"框定第{self.question_index}题答案区域出错: {str(e)}", is_error=True)
+            self._log_message(f"框定第{self.question_index}题答案区域出错: {str(e)}", is_error=True)
 
     def _ensure_answer_window_visible(self, answer_window):
         """确保答案框窗口可见并获得焦点"""
@@ -671,10 +749,13 @@ class QuestionConfigDialog(QDialog):
 
             self.capture_answer_area(x1, y1, x2, y2)
 
-            self.parent.log_message(f"第{self.question_index}题答案区域已框定: ({x1}, {y1}) - ({x2}, {y2})")
+            self._log_message(f"第{self.question_index}题答案区域已框定: ({x1}, {y1}) - ({x2}, {y2})")
 
             # 恢复按钮状态
-            self.set_answer_button.clicked.disconnect()
+            try:
+                self.set_answer_button.clicked.disconnect()
+            except TypeError:
+                pass
             self.set_answer_button.clicked.connect(self.start_answer_area_selection)
             self.set_answer_button.setText("重新框定答案区域")
             self.set_answer_button.setStyleSheet("")
@@ -685,16 +766,16 @@ class QuestionConfigDialog(QDialog):
             # 关闭答案框窗口
             answer_window.close()
         except Exception as e:
-            self.parent.log_message(f"确认第{self.question_index}题答案区域出错: {str(e)}", is_error=True)
+            self._log_message(f"确认第{self.question_index}题答案区域出错: {str(e)}", is_error=True)
 
     def capture_answer_area(self, x1, y1, x2, y2):
         """捕获答案区域的屏幕截图或处理坐标"""
         try:
             # 这里可以添加逻辑来捕获屏幕截图或其他处理
             # 目前作为占位符，确保方法存在
-            self.parent.log_message(f"答案区域坐标已处理: ({x1}, {y1}) - ({x2}, {y2})")
+            self._log_message(f"答案区域坐标已处理: ({x1}, {y1}) - ({x2}, {y2})")
         except Exception as e:
-            self.parent.log_message(f"处理答案区域坐标出错: {str(e)}", is_error=True)
+            self._log_message(f"处理答案区域坐标出错: {str(e)}", is_error=True)
 
     def set_position(self, x_edit_name, y_edit_name, position_name):
         """设置位置坐标"""
@@ -703,11 +784,12 @@ class QuestionConfigDialog(QDialog):
             if not hasattr(self, 'instruction_label'):
                 self.instruction_label = QLabel("")
                 # 将标签插入到布局的顶部（索引为0，确保在最顶端）
-                self.layout().insertWidget(0, self.instruction_label)
+                self.layout().insertWidget(0, self.instruction_label)  # type: ignore
 
             self.instruction_label.setText(f"请将鼠标移动到{position_name}位置，5秒后将自动捕获位置...")
-            self.instruction_label.setStyleSheet("color: red; font-weight: bold; font-size: 16px;")
-            self.parent.log_message(f"请将鼠标移动到{position_name}位置，5秒后将自动捕获位置...")
+            self.instruction_label.setStyleSheet("color: red; font-weight: bold;")
+            
+            self._log_message(f"请将鼠标移动到{position_name}位置，5秒后将自动捕获位置...")
 
             # 使用定时器模拟等待5秒
             # 创建一个全新的定时器实例以确保信号连接正确
@@ -717,7 +799,7 @@ class QuestionConfigDialog(QDialog):
             self.position_capture_timer.start(5000)
 
         except Exception as e:
-            self.parent.log_message(f"设置{position_name}位置出错: {str(e)}", is_error=True)
+            self._log_message(f"设置{position_name}位置出错: {str(e)}", is_error=True)
             if hasattr(self, 'instruction_label'):
                 self.instruction_label.setText("")
 
@@ -736,10 +818,12 @@ class QuestionConfigDialog(QDialog):
             # 更新提示信息
             if hasattr(self, 'instruction_label'):
                 self.instruction_label.setText(f"{position_name}位置已捕获: ({x}, {y})")
-            self.parent.log_message(f"{position_name}位置已设置为: ({x}, {y})")
-            self.position_capture_timer = None # 任务完成，清理引用
+            
+            self._log_message(f"{position_name}位置已设置为: ({x}, {y})")
+            
+            self.position_capture_timer = None  # 任务完成，清理引用
         except Exception as e:
-            self.parent.log_message(f"捕获{position_name}位置出错: {str(e)}", is_error=True)
+            self._log_message(f"捕获{position_name}位置出错: {str(e)}", is_error=True)
             if hasattr(self, 'instruction_label'):
                 self.instruction_label.setText("")
 
@@ -765,12 +849,13 @@ class QuestionConfigDialog(QDialog):
             answer_y2 = int(self.answer_y2_edit.text())
 
             # --- 新增：获取并保存题目类型 ---
-            selected_display_text = self.question_type_combo.currentText()
-            selected_type_identifier = 'Subjective_PointBased_QA' # 默认值
-            for identifier, display in self.question_types_map.items(): # self.question_types_map 在 init_ui 中定义
-                if display == selected_display_text:
-                    selected_type_identifier = identifier
-                    break
+            selected_display_text = self.question_type_combo.currentText() if self.question_type_combo else 'Subjective_PointBased_QA'
+            selected_type_identifier = 'Subjective_PointBased_QA'  # 默认值
+            if self.question_type_combo:
+                for identifier, display in self.question_types_map.items():  # self.question_types_map 在 init_ui 中定义
+                    if display == selected_display_text:
+                        selected_type_identifier = identifier
+                        break
             # --- 结束新增 ---
 
             # 更新题目配置
@@ -779,7 +864,7 @@ class QuestionConfigDialog(QDialog):
                 self.config_manager.update_question_config(str(self.question_index), 'min_score', min_score)
                 self.config_manager.update_question_config(str(self.question_index), 'score_input_pos', (score_x, score_y))
                 self.config_manager.update_question_config(str(self.question_index), 'confirm_button_pos', (submit_x, submit_y))
-                self.config_manager.update_question_config(str(self.question_index), 'question_type', selected_type_identifier) # 保存题目类型
+                self.config_manager.update_question_config(str(self.question_index), 'question_type', selected_type_identifier)  # 保存题目类型
                 self.config_manager.update_question_config(str(self.question_index), 'answer_area', {
                     'x1': answer_x1,
                     'y1': answer_y1,
@@ -789,9 +874,10 @@ class QuestionConfigDialog(QDialog):
 
             # 更新当前小题的翻页按钮配置
             enable_next_for_current_q = self.enable_next_check.isChecked()
-            self.config_manager.update_question_config(str(self.question_index), 'enable_next_button', enable_next_for_current_q)
+            if self.config_manager:
+                self.config_manager.update_question_config(str(self.question_index), 'enable_next_button', enable_next_for_current_q)
 
-            if enable_next_for_current_q:
+            if enable_next_for_current_q and self.config_manager:
                 try:
                     current_q_next_x = int(self.next_x_edit.text())
                     current_q_next_y = int(self.next_y_edit.text())
@@ -799,40 +885,41 @@ class QuestionConfigDialog(QDialog):
                 except ValueError:
                     # 如果坐标无效，则保存为 None，并记录日志或提示用户
                     self.config_manager.update_question_config(str(self.question_index), 'next_button_pos', None)
-                    if self.parent and hasattr(self.parent, 'log_message'):
-                        self.parent.log_message(f"警告: 第{self.question_index}题的翻页按钮坐标无效，未保存。", is_error=True)
-            else:
+                    self._log_message(f"警告: 第{self.question_index}题的翻页按钮坐标无效，未保存。", is_error=True)
+            elif self.config_manager:
                 self.config_manager.update_question_config(str(self.question_index), 'next_button_pos', None)
 
             # --- 开始保存三步打分相关配置 (仅第一题) ---
-            if self.question_index == 1 and self.three_step_scoring_checkbox: # 确保复选框已创建
+            if self.question_index == 1 and self.three_step_scoring_checkbox and self.config_manager:  # 确保复选框和config_manager已创建
                 is_three_step_enabled = self.three_step_scoring_checkbox.isChecked()
-                self.config_manager.update_question_config(str(self.question_index), 'enable_three_step_scoring', is_three_step_enabled) # 使用 str(self.question_index)
+                self.config_manager.update_question_config(str(self.question_index), 'enable_three_step_scoring', is_three_step_enabled)  # 使用 str(self.question_index)
 
-                if is_three_step_enabled:
+                if is_three_step_enabled and self.score_x_edit_step1 and self.score_y_edit_step1:
                     try:
                         pos_s1_x = int(self.score_x_edit_step1.text())
                         pos_s1_y = int(self.score_y_edit_step1.text())
                         self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step1', (pos_s1_x, pos_s1_y))
                     except ValueError:
                         self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step1', None)
-                        if self.parent: self.parent.log_message(f"警告: 第{self.question_index}题三步打分位置1坐标无效", True)
+                        self._log_message(f"警告: 第{self.question_index}题三步打分位置1坐标无效", is_error=True)
 
-                    try:
-                        pos_s2_x = int(self.score_x_edit_step2.text())
-                        pos_s2_y = int(self.score_y_edit_step2.text())
-                        self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step2', (pos_s2_x, pos_s2_y))
-                    except ValueError:
-                        self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step2', None)
-                        if self.parent: self.parent.log_message(f"警告: 第{self.question_index}题三步打分位置2坐标无效", True)
+                    if self.score_x_edit_step2 and self.score_y_edit_step2:
+                        try:
+                            pos_s2_x = int(self.score_x_edit_step2.text())
+                            pos_s2_y = int(self.score_y_edit_step2.text())
+                            self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step2', (pos_s2_x, pos_s2_y))
+                        except ValueError:
+                            self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step2', None)
+                            self._log_message(f"警告: 第{self.question_index}题三步打分位置2坐标无效", is_error=True)
 
-                    try:
-                        pos_s3_x = int(self.score_x_edit_step3.text())
-                        pos_s3_y = int(self.score_y_edit_step3.text())
-                        self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step3', (pos_s3_x, pos_s3_y))
-                    except ValueError:
-                        self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step3', None)
-                        if self.parent: self.parent.log_message(f"警告: 第{self.question_index}题三步打分位置3坐标无效", True)
+                    if self.score_x_edit_step3 and self.score_y_edit_step3:
+                        try:
+                            pos_s3_x = int(self.score_x_edit_step3.text())
+                            pos_s3_y = int(self.score_y_edit_step3.text())
+                            self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step3', (pos_s3_x, pos_s3_y))
+                        except ValueError:
+                            self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step3', None)
+                            self._log_message(f"警告: 第{self.question_index}题三步打分位置3坐标无效", is_error=True)
                 else:
                     # 如果未启用，可以选择清除这些位置或保持原样
                     # 为了简单，可以不清除，ConfigManager在加载时会处理None
@@ -842,46 +929,50 @@ class QuestionConfigDialog(QDialog):
                     self.config_manager.update_question_config(str(self.question_index), 'score_input_pos_step3', None)
             # --- 结束保存三步打分相关配置 ---
 
-            self.parent.log_message(f"第{self.question_index}题配置已保存")
-            log_enable_next_status = self.config_manager.get_question_config(self.question_index).get('enable_next_button', False)
-            self.parent.log_message(f"第{self.question_index}题翻页按钮状态: {'启用' if log_enable_next_status else '禁用'}")
-            self.parent.log_message(f"答案区域已配置: ({answer_x1}, {answer_y1}) - ({answer_x2}, {answer_y2})")
+            if self.parent_window and hasattr(self.parent_window, 'log_message') and self.config_manager:
+                self._log_message(f"第{self.question_index}题配置已保存")
+                log_enable_next_status = self.config_manager.get_question_config(self.question_index).get('enable_next_button', False)
+                self._log_message(f"第{self.question_index}题翻页按钮状态: {'启用' if log_enable_next_status else '禁用'}")
+                self._log_message(f"答案区域已配置: ({answer_x1}, {answer_y1}) - ({answer_x2}, {answer_y2})")
 
             # 发射信号通知配置已更新，由MainWindow负责保存到文件
             self.config_updated.emit()
 
             self.accept()
         except Exception as e:
-            self.parent.log_message(f"保存配置出错: {str(e)}", is_error=True)
+            self._log_message(f"保存配置出错: {str(e)}", is_error=True)
 
     def toggle_three_step_mode_ui(self, checked):
-        """根据三步打分模式复选框状态，切换UI元素的启用/禁用"""
-        if self.question_index == 1: # 确保只对第一题操作
-            # 当启用三步打分时，自动设置满分上限为60（高中作文默认）
-            if checked:
-                self.max_score_edit.setValue(60)  # 三步打分默认60分
+        """根据三步打分模式复选框状态，切换UI元素的启用/禁用和显示/隐藏"""
+        if self.question_index != 1:  # 确保只对第一题操作
+            return
+            
+        # 当启用三步打分时，自动设置满分上限为60（高中作文默认）
+        if checked:
+            self.max_score_edit.setValue(60)  # 三步打分默认60分
 
-            # 切换原有单点分数输入组的启用状态
-            if self.original_score_input_group:
-                self.original_score_input_group.setEnabled(not checked)
+        # 切换原有单点分数输入组的启用/显示状态
+        if self.original_score_input_group:
+            self.original_score_input_group.setEnabled(not checked)
+            self.original_score_input_group.setVisible(not checked)  # 未启用时隐藏
 
-            # 切换三个新分数输入位置组的启用状态
-            if self.score_input_group_step1:
-                self.score_input_group_step1.setEnabled(checked)
-            if self.score_input_group_step2:
-                self.score_input_group_step2.setEnabled(checked)
-            if self.score_input_group_step3:
-                self.score_input_group_step3.setEnabled(checked)
-        else: # 如果不是第一题，确保三步打分相关UI是禁用的（理论上不应显示）
-            if self.score_input_group_step1: self.score_input_group_step1.setEnabled(False)
-            if self.score_input_group_step2: self.score_input_group_step2.setEnabled(False)
-            if self.score_input_group_step3: self.score_input_group_step3.setEnabled(False)
-            if self.original_score_input_group: self.original_score_input_group.setEnabled(True)
+        # 切换三个新分数输入位置组的启用/显示状态
+        # 启用时显示并启用，未启用时隐藏并禁用
+        if self.score_input_group_step1:
+            self.score_input_group_step1.setEnabled(checked)
+            self.score_input_group_step1.setVisible(checked)  # 启用时显示
+        if self.score_input_group_step2:
+            self.score_input_group_step2.setEnabled(checked)
+            self.score_input_group_step2.setVisible(checked)  # 启用时显示
+        if self.score_input_group_step3:
+            self.score_input_group_step3.setEnabled(checked)
+            self.score_input_group_step3.setVisible(checked)  # 启用时显示
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         """窗口关闭事件，确保停止任何活动的定时器"""
         if self.position_capture_timer and self.position_capture_timer.isActive():
             self.position_capture_timer.stop()
-        super().closeEvent(event)
+        if a0 is not None:
+            super().closeEvent(a0)
 
 # --- END OF FILE question_config_dialog.py (Corrected) ---
