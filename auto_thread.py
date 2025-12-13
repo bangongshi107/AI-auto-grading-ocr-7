@@ -12,7 +12,6 @@ import json
 import re
 from typing import Optional
 from threading import Lock
-from threading import Lock
 
 # 导入OCR配置函数
 from config_manager import get_ocr_quality_internal_value
@@ -114,14 +113,6 @@ class GradingThread(QThread):
         self.first_model_id = ''
         self.second_model_id = ''
         self.is_single_question_one_run = False
-        
-        # =================================================================
-        # P0修复：线程安全与并发问题
-        # =================================================================
-        # 添加线程锁保护共享资源的并发访问
-        self._params_lock = Lock()  # 保护self.parameters
-        self._state_lock = Lock()   # 保护completion_status等状态变量
-        self._temp_resources = []   # 追踪临时资源（图片对象等）以便清理
         
         # =================================================================
         # P0修复：线程安全与并发问题
@@ -470,156 +461,180 @@ class GradingThread(QThread):
             question_configs = params.get('question_configs', []) if isinstance(params, dict) else []
             dual_evaluation = params.get('dual_evaluation', False) if isinstance(params, dict) else False
             score_diff_threshold = params.get('score_diff_threshold', 10) if isinstance(params, dict) else 10
-            ocr_mode = params.get('ocr_mode', '') if isinstance(params, dict) else ''
-            self.log_signal.emit(f"OCR 模式: {ocr_mode}", False, "DETAIL")
+            # OCR模式现在是各小题独立配置，在question_configs中的ocr_mode_index字段
+            self.log_signal.emit(f"OCR模式已变更为各小题独立配置", False, "DETAIL")
 
             if not question_configs:
                 self._set_error_state("未配置题目信息")
                 return
 
-            # 设置总题数（在单题模式下总是1）
-            self.total_question_count_in_run = len(question_configs)
+            # 设置总题数（多题模式支持最多5题）
+            num_questions = len(question_configs)
+            self.total_question_count_in_run = num_questions
+            self.log_signal.emit(f"多题模式：本次阅卷共 {num_questions} 道题目", False, "INFO")
 
-            # 单题模式：只处理第一题
             # 记录开始时间
             start_time = time.time()
             elapsed_time = 0
 
-            # 执行循环
+            # 执行循环（每次循环批改所有启用的题目）
             for i in range(cycle_number):
                 if not self.running:
                     break
 
-                self.log_signal.emit(f"开始第 {i+1}/{cycle_number} 次阅卷", False, "DETAIL")
+                self.log_signal.emit(f"开始第 {i+1}/{cycle_number} 次阅卷（共 {num_questions} 题）", False, "DETAIL")
 
-                # 单题模式只处理第一题
-                q_config = question_configs[0]  # 第一题配置
-                question_index = 1
-                self.log_signal.emit(f"正在处理第 {question_index} 题", False, "DETAIL")
-
-                # 设置当前题目索引
-                self.api_service.set_current_question(question_index)
-
-                # 获取题目配置
-                score_input_pos = q_config.get('score_input_pos', (0, 0))
-                confirm_button_pos = q_config.get('confirm_button_pos', (0, 0))
-                standard_answer = q_config.get('standard_answer', '')
-
-                # 检查位置配置
-                if score_input_pos == (0, 0) or confirm_button_pos == (0, 0):
-                    self._set_error_state(f"第 {question_index} 题未配置位置信息")
-                    break
-
-                # 获取当前题目的答案区域
-                answer_area_data = q_config.get('answer_area', {})
-                if not answer_area_data or not all(key in answer_area_data for key in ['x1', 'y1', 'x2', 'y2']):
-                    self._set_error_state(f"第 {question_index} 题未配置答案区域")
-                    break
-
-                # 获取题目类型
-                question_type = q_config.get('question_type', 'Subjective_PointBased_QA')
-                if not question_type:
-                    self.log_signal.emit(f"警告：第 {question_index} 题未配置题目类型，将使用默认类型 'Subjective_PointBased_QA'。", True, "ERROR")
-                    question_type = 'Subjective_PointBased_QA'
-
-                # 截取答案区域
-                x1 = answer_area_data.get('x1', 0)
-                y1 = answer_area_data.get('y1', 0)
-                x2 = answer_area_data.get('x2', 0)
-                y2 = answer_area_data.get('y2', 0)
-
-                # 确保 x1, y1 是左上角坐标
-                x = min(x1, x2)
-                y = min(y1, y2)
-                width = abs(x2 - x1)
-                height = abs(y2 - y1)
-
-                answer_area_tuple = (x, y, width, height)
-
-                img_str = self.capture_answer_area(answer_area_tuple)
-                if not self.running: break  # 如果截取失败，整个流程已停止
-
-                # 构建JSON Prompt
-                self.log_signal.emit(f"为第 {question_index} 题 (类型: {question_type}) 构建Prompt...", False, "DETAIL")
-                # 根据参数自动切换为 OCR 模式提示词（当 ocr_mode == 'baidu_ocr' 时）
-                text_prompt_for_api = self.select_and_build_prompt(standard_answer, question_type, ocr_mode=(ocr_mode == 'baidu_ocr'))
-
-                if text_prompt_for_api is None:
-                    if not self.running: break
-                    continue
-
-                # 检查是否启用OCR辅助识别
-                ocr_text = ""
-                ocr_meta = None
-                if hasattr(self, 'parameters') and self.parameters.get('ocr_mode') == 'baidu_ocr':
-                    ocr_text, ocr_meta = self._perform_ocr_recognition(img_str, question_type)
-                    # 在UI中显示OCR识别结果
-                    if ocr_text and isinstance(ocr_text, str) and ocr_text.strip():
-                        self.log_signal.emit(f"OCR识别结果: {ocr_text[:200]}", False, "RESULT")
-                    else:
-                        self.log_signal.emit("OCR未能识别到文字", False, "RESULT")
-
-                    # 如果检测到需要人工介入，停止并等待人工处理
-                    if ocr_meta and ocr_meta.get('manual_intervention'):
-                        reason = ocr_meta.get('reason') or 'OCR质量不达标，需人工介入'
-                        self.log_signal.emit(f"OCR质量不足，暂停阅卷并等待人工复核: {reason}", True, "ERROR")
-                        try:
-                            # 发送人工介入信号到UI
-                            self.manual_intervention_signal.emit(reason, ocr_text)
-                        except Exception:
-                            pass
-                        self._set_error_state(f"OCR质量不足，人工复核: {reason}")
-                        break
-                    # 额外保护：若未返回meta或识别文本为空（即使没有meta标记为人工），也应暂停并等待人工处理
-                    if (ocr_meta is None) or (not ocr_text or not ocr_text.strip()):
-                        reason = 'OCR未能识别到有效文本或未返回OCR元信息，需人工介入'
-                        self.log_signal.emit(f"OCR识别文本为空或元信息缺失，暂停阅卷并等待人工复核: {reason}", True, "ERROR")
-                        self._set_error_state(reason)
+                # 多题模式：遍历所有启用的题目
+                for q_idx, q_config in enumerate(question_configs):
+                    if not self.running:
                         break
 
-                # 调用API进行评分
-                img_for_api = img_str
-                if hasattr(self, 'parameters') and self.parameters.get('ocr_mode') == 'baidu_ocr':
-                    # OCR模式：不再上传原图给AI，仅发送OCR文本
-                    img_for_api = ""
+                    question_index = q_config.get('question_index', q_idx + 1)
+                    self.log_signal.emit(f"正在处理第 {question_index} 题（本轮第 {q_idx + 1}/{num_questions} 题）", False, "DETAIL")
 
-                eval_result = self.evaluate_answer(
-                    img_for_api, text_prompt_for_api, q_config, dual_evaluation, score_diff_threshold, ocr_text
-                )
+                    # 设置当前题目索引
+                    self.api_service.set_current_question(question_index)
 
-                # 检查是否完全失败，如果失败则完全停止阅卷
-                if eval_result is None:
-                    self.log_signal.emit("评分处理完全失败，阅卷停止，等待用户手动操作", True, "ERROR")
-                    self._set_error_state("评分处理失败，需手动处理")
-                    break
+                    # 获取题目配置
+                    score_input_pos = q_config.get('score_input_pos', (0, 0))
+                    confirm_button_pos = q_config.get('confirm_button_pos', (0, 0))
+                    standard_answer = q_config.get('standard_answer', '')
+                    # 获取每道题单独的步长设置
+                    score_rounding_step = q_config.get('score_rounding_step', 0.5)
 
-                score, reasoning_data, itemized_scores_data, confidence_data, raw_ai_response = eval_result
+                    # 检查位置配置
+                    if score_input_pos == (0, 0) or confirm_button_pos == (0, 0):
+                        self._set_error_state(f"第 {question_index} 题未配置位置信息")
+                        break
 
-                # 如果评分处理失败，完全停止阅卷，等待用户手动操作
-                if score is None:
-                    self.log_signal.emit(f"第 {question_index} 题评分失败，阅卷完全停止，等待用户手动操作", True, "ERROR")
-                    self._set_error_state(f"第 {question_index} 题评分失败，需手动处理")
-                    break
+                    # 获取当前题目的答案区域
+                    answer_area_data = q_config.get('answer_area', {})
+                    if not answer_area_data or not all(key in answer_area_data for key in ['x1', 'y1', 'x2', 'y2']):
+                        self._set_error_state(f"第 {question_index} 题未配置答案区域")
+                        break
 
-                # 输入分数
-                self.input_score(score, score_input_pos, confirm_button_pos, q_config)
+                    # 获取题目类型
+                    question_type = q_config.get('question_type', 'Subjective_PointBased_QA')
+                    if not question_type:
+                        self.log_signal.emit(f"警告：第 {question_index} 题未配置题目类型，将使用默认类型 'Subjective_PointBased_QA'。", True, "ERROR")
+                        question_type = 'Subjective_PointBased_QA'
 
+                    # 截取答案区域
+                    x1 = answer_area_data.get('x1', 0)
+                    y1 = answer_area_data.get('y1', 0)
+                    x2 = answer_area_data.get('x2', 0)
+                    y2 = answer_area_data.get('y2', 0)
+
+                    # 确保 x1, y1 是左上角坐标
+                    x = min(x1, x2)
+                    y = min(y1, y2)
+                    width = abs(x2 - x1)
+                    height = abs(y2 - y1)
+
+                    answer_area_tuple = (x, y, width, height)
+
+                    img_str = self.capture_answer_area(answer_area_tuple)
+                    if not self.running: break  # 如果截取失败，整个流程已停止
+
+                    # 获取当前题目的OCR模式配置（0=纯AI，1=百度OCR）
+                    q_ocr_mode_index = q_config.get('ocr_mode_index', 0)
+                    is_baidu_ocr_mode = (q_ocr_mode_index == 1)
+                    q_ocr_quality_level = q_config.get('ocr_quality_level', 'moderate')
+                    self.log_signal.emit(f"题目{question_index} OCR模式: {'百度OCR' if is_baidu_ocr_mode else '纯AI'}, 精度: {q_ocr_quality_level}", False, "DETAIL")
+
+                    # 构建JSON Prompt
+                    self.log_signal.emit(f"为第 {question_index} 题 (类型: {question_type}) 构建Prompt...", False, "DETAIL")
+                    # 根据当前题目的OCR配置自动切换为 OCR 模式提示词
+                    text_prompt_for_api = self.select_and_build_prompt(standard_answer, question_type, ocr_mode=is_baidu_ocr_mode)
+
+                    if text_prompt_for_api is None:
+                        if not self.running: break
+                        continue
+
+                    # 检查是否启用OCR辅助识别（根据当前题目配置）
+                    ocr_text = ""
+                    ocr_meta = None
+                    if is_baidu_ocr_mode:
+                        ocr_text, ocr_meta = self._perform_ocr_recognition(img_str, question_type, ocr_quality_level=q_ocr_quality_level)
+                        # 在UI中显示OCR识别结果
+                        if ocr_text and isinstance(ocr_text, str) and ocr_text.strip():
+                            self.log_signal.emit(f"题目{question_index} OCR识别结果: {ocr_text[:200]}", False, "RESULT")
+                        else:
+                            self.log_signal.emit(f"题目{question_index} OCR未能识别到文字", False, "RESULT")
+
+                        # 如果检测到需要人工介入，停止并等待人工处理
+                        if ocr_meta and ocr_meta.get('manual_intervention'):
+                            reason = ocr_meta.get('reason') or 'OCR质量不达标，需人工介入'
+                            self.log_signal.emit(f"题目{question_index} OCR质量不足，暂停阅卷并等待人工复核: {reason}", True, "ERROR")
+                            try:
+                                # 发送人工介入信号到UI
+                                self.manual_intervention_signal.emit(reason, ocr_text)
+                            except Exception:
+                                pass
+                            self._set_error_state(f"题目{question_index} OCR质量不足，人工复核: {reason}")
+                            break
+                        # 额外保护：若未返回meta或识别文本为空（即使没有meta标记为人工），也应暂停并等待人工处理
+                        if (ocr_meta is None) or (not ocr_text or not ocr_text.strip()):
+                            reason = f'题目{question_index} OCR未能识别到有效文本或未返回OCR元信息，需人工介入'
+                            self.log_signal.emit(f"OCR识别文本为空或元信息缺失，暂停阅卷并等待人工复核: {reason}", True, "ERROR")
+                            self._set_error_state(reason)
+                            # 直接返回而不是break，确保外层循环也能正确停止
+                            return
+
+                    # 调用API进行评分
+                    img_for_api = img_str
+                    if is_baidu_ocr_mode:
+                        # OCR模式：不再上传原图给AI，仅发送OCR文本
+                        img_for_api = ""
+
+                    eval_result = self.evaluate_answer(
+                        img_for_api, text_prompt_for_api, q_config, dual_evaluation, score_diff_threshold, ocr_text
+                    )
+
+                    # 检查是否完全失败，如果失败则完全停止阅卷
+                    if eval_result is None:
+                        self.log_signal.emit(f"题目{question_index} 评分处理完全失败，阅卷停止，等待用户手动操作", True, "ERROR")
+                        self._set_error_state(f"题目{question_index} 评分处理失败，需手动处理")
+                        break
+
+                    score, reasoning_data, itemized_scores_data, confidence_data, raw_ai_response = eval_result
+
+                    # 如果评分处理失败，完全停止阅卷，等待用户手动操作
+                    if score is None:
+                        self.log_signal.emit(f"第 {question_index} 题评分失败，阅卷完全停止，等待用户手动操作", True, "ERROR")
+                        self._set_error_state(f"第 {question_index} 题评分失败，需手动处理")
+                        break
+
+                    # 使用每道题独立的步长设置对分数进行四舍五入
+                    score = round_to_step(score, score_rounding_step)
+                    self.log_signal.emit(f"题目{question_index} 分数已按步长 {score_rounding_step} 四舍五入为 {score}", False, "DETAIL")
+
+                    # 输入分数
+                    self.input_score(score, score_input_pos, confirm_button_pos, q_config)
+
+                    if not self.running:
+                        break
+
+                    # 记录阅卷结果：将 OCR 元数据一并保存（如果有）
+                    self.record_grading_result(question_index, score, img_str, reasoning_data, itemized_scores_data, confidence_data, raw_ai_response, ocr_text, ocr_meta)
+
+                    # 题目之间的短暂等待（如果不是最后一题）
+                    if q_idx < num_questions - 1 and self.running:
+                        time.sleep(0.5)  # 题目间短暂等待
+
+                # 检查是否因错误退出内层循环
                 if not self.running:
                     break
 
-                # 更新进度
+                # 更新进度（一轮完成后更新）
                 self.completed_count = i + 1
                 total = cycle_number
                 self.progress_signal.emit(self.completed_count, total)
 
-                # 记录阅卷结果：将 OCR 元数据一并保存（如果有）
-                self.record_grading_result(question_index, score, img_str, reasoning_data, itemized_scores_data, confidence_data, raw_ai_response, ocr_text, ocr_meta)
-
-                # 等待指定时间
-                if self.running and wait_time > 0:
+                # 轮次之间等待指定时间
+                if self.running and wait_time > 0 and i < cycle_number - 1:
+                    self.log_signal.emit(f"等待 {wait_time} 秒后开始下一轮...", False, "DETAIL")
                     time.sleep(wait_time)
-
-                # 单题模式不需要翻页逻辑
 
             # 计算总用时
             elapsed_time = time.time() - start_time
@@ -902,7 +917,7 @@ class GradingThread(QThread):
         )
         if error1:
             self._set_error_state(error1)
-            return None, error1, None, None, None
+            return None, error1, None, None, ""
 
         # 如果不启用双评，直接返回第一个API的结果
         if not dual_evaluation:
@@ -919,7 +934,7 @@ class GradingThread(QThread):
         )
         if error2:
             self._set_error_state(error2)
-            return None, error2, None, None, None
+            return None, error2, None, None, ""
 
         # 处理双评结果
         final_score, combined_reasoning, combined_scores, combined_confidence, error_dual = self._handle_dual_evaluation(
@@ -932,11 +947,13 @@ class GradingThread(QThread):
             self.completion_status = "threshold_exceeded"
             self.interrupt_reason = error_dual
             self.running = False
-            return None, error_dual, None, None, None
+            return None, error_dual, None, None, ""
 
-        return final_score, combined_reasoning, combined_scores, combined_confidence, None
+        # 双评模式成功时，合并两次API的原始响应
+        combined_raw_response = f"API1:\n{response_text1}\n\nAPI2:\n{response_text2}"
+        return final_score, combined_reasoning, combined_scores, combined_confidence, combined_raw_response
 
-    def _perform_ocr_recognition(self, img_str, question_type='Subjective_PointBased_QA'):
+    def _perform_ocr_recognition(self, img_str, question_type='Subjective_PointBased_QA', ocr_quality_level='moderate'):
         """
         执行OCR识别（学生手写答案专用版本）
         
@@ -956,6 +973,7 @@ class GradingThread(QThread):
         Args:
             img_str: base64编码的图片字符串
             question_type: 题目类型，用于确定OCR质量阈值
+            ocr_quality_level: OCR精度等级，可选值为 'relaxed'/'moderate'/'strict'，默认 'moderate'
         
         Returns:
             (ocr_text, meta_info)
@@ -1151,9 +1169,9 @@ class GradingThread(QThread):
                     'detailed_reason': f"⚠️ OCR置信度计算异常，无法信任识别结果\n\n错误详情：\n{error_msg}\n\n建议：请手动检查答题卡清晰度，或联系技术支持"
                 }
             
-            # 🎯 获取用户选择的质量等级和对应阈值
-            quality_level = getattr(self.api_service.config_manager, 'ocr_quality_level', 'moderate')
-            # 转换UI文本到内部值
+            # 🎯 获取用户选择的质量等级和对应阈值（使用传入的参数）
+            quality_level = ocr_quality_level
+            # 转换UI文本到内部值（以防传入的是UI文本）
             quality_level = get_ocr_quality_internal_value(quality_level)
             
             # 获取该质量等级下的题型阈值

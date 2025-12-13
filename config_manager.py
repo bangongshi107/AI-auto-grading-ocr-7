@@ -73,14 +73,22 @@ class ConfigManager:
             "baidu_ocr": self.OCR_MODE_BAIDU_OCR,
         }
 
-        self.max_questions = 4
+        self.max_questions = 8
         self._init_default_config()
         self.load_config()
         ConfigManager._initialized = True
 
     def _init_default_config(self):
-        """初始化默认配置值"""
-        # --- CHANGED: URL 字段被 provider 字段替换 ---
+        """初始化默认配置值
+        
+        注意：
+        - first_api_provider 和 second_api_provider 是AI评分模型提供商
+        - OCR模式（ocr_mode_index）是独立的工作模式选择：
+          * 0 = 纯AI识图阅卷（AI直接读取图片）
+          * 1 = 百度OCR模式（先OCR识别文字，再AI评分）
+        - OCR和AI评分是两个独立的功能，不应混淆
+        """
+        # --- AI评分模型提供商配置 ---
         self.first_api_provider = "volcengine" # 默认使用火山引擎
         self.first_api_key = ""
         self.first_modelID = ""
@@ -94,6 +102,7 @@ class ConfigManager:
         self.cycle_number = 1
         self.wait_time = 2
 
+        # --- OCR工作模式配置（独立于AI模型选择）---
         # OCR配置（使用索引，0=纯AI，1=百度OCR）
         self.ocr_mode_index = self.OCR_MODE_PURE_AI  # 默认使用纯AI模式
         self.baidu_ocr_api_key = ""
@@ -121,6 +130,9 @@ class ConfigManager:
                 'enable_next_button': False,
                 'next_button_pos': None,
                 'question_type': 'Subjective_PointBased_QA',
+                'score_rounding_step': 0.5,  # 每题独立步长，默认0.5
+                'ocr_mode_index': 0,  # 每题独立OCR模式，0=纯AI，1=百度OCR
+                'ocr_quality_level': 'moderate',  # 每题独立OCR精度，relaxed/moderate/strict
             }
             if is_q1:
                 self.question_configs[str(i)].update({
@@ -194,7 +206,10 @@ class ConfigManager:
                 'max_score': self._get_config_safe(section_name, 'max_score', 100, int),
                 'enable_next_button': self._get_config_safe(section_name, 'enable_next_button', False, bool),
                 'next_button_pos': self._parse_position(self._get_config_safe(section_name, 'next_button_pos', None)),
-                'question_type': self._get_config_safe(section_name, 'question_type', 'Subjective_PointBased_QA', str)
+                'question_type': self._get_config_safe(section_name, 'question_type', 'Subjective_PointBased_QA', str),
+                'score_rounding_step': float(self._get_config_safe(section_name, 'score_rounding_step', '0.5')),  # 每题独立步长
+                'ocr_mode_index': self._get_config_safe(section_name, 'ocr_mode_index', 0, int),  # 每题独立OCR模式
+                'ocr_quality_level': self._get_config_safe(section_name, 'ocr_quality_level', 'moderate', str),  # 每题独立OCR精度
             }
             if i == 1:
                 current_q_config['enable_three_step_scoring'] = self._get_config_safe(section_name, 'enable_three_step_scoring', False, bool)
@@ -261,6 +276,12 @@ class ConfigManager:
                 self.ocr_mode_index = int(value) if value is not None else self.OCR_MODE_PURE_AI
             except (ValueError, TypeError):
                 self.ocr_mode_index = self.OCR_MODE_PURE_AI
+        elif field_name == 'ocr_mode':
+            # 处理UI层传来的字符串值 ('pure_ai' 或 'baidu_ocr')
+            if value == 'baidu_ocr':
+                self.ocr_mode_index = self.OCR_MODE_BAIDU_OCR
+            else:
+                self.ocr_mode_index = self.OCR_MODE_PURE_AI
         elif field_name == 'baidu_ocr_api_key': self.baidu_ocr_api_key = str(value) if value else ""
         elif field_name == 'baidu_ocr_secret_key': self.baidu_ocr_secret_key = str(value) if value else ""
         elif field_name == 'ocr_quality_level': self.ocr_quality_level = str(value) if value else 'moderate'
@@ -293,6 +314,18 @@ class ConfigManager:
         elif field_type == 'enable_next_button': self.question_configs[q_index]['enable_next_button'] = bool(value)
         elif field_type == 'next_button_pos': self.question_configs[q_index]['next_button_pos'] = value
         elif field_type == 'question_type': self.question_configs[q_index]['question_type'] = str(value) if value else 'Subjective_PointBased_QA'
+        elif field_type == 'score_rounding_step':  # 每题独立步长
+            try:
+                self.question_configs[q_index]['score_rounding_step'] = float(value) if value is not None else 0.5
+            except (ValueError, TypeError):
+                self.question_configs[q_index]['score_rounding_step'] = 0.5
+        elif field_type == 'ocr_mode_index':  # 每题独立OCR模式
+            try:
+                self.question_configs[q_index]['ocr_mode_index'] = int(value) if value is not None else 0
+            except (ValueError, TypeError):
+                self.question_configs[q_index]['ocr_mode_index'] = 0
+        elif field_type == 'ocr_quality_level':  # 每题独立OCR精度
+            self.question_configs[q_index]['ocr_quality_level'] = str(value) if value else 'moderate'
         elif q_index == '1': # 仅第一题
             if field_type == 'enable_three_step_scoring': self.question_configs[q_index]['enable_three_step_scoring'] = bool(value)
             elif field_type == 'score_input_pos_step1': self.question_configs[q_index]['score_input_pos_step1'] = value
@@ -350,6 +383,9 @@ class ConfigManager:
                     'max_score': str(q_config['max_score']),
                     'enable_next_button': str(q_config['enable_next_button']),
                     'question_type': q_config.get('question_type', 'Subjective_PointBased_QA'),
+                    'score_rounding_step': str(q_config.get('score_rounding_step', 0.5)),  # 每题独立步长
+                    'ocr_mode_index': str(q_config.get('ocr_mode_index', 0)),  # 每题独立OCR模式
+                    'ocr_quality_level': q_config.get('ocr_quality_level', 'moderate'),  # 每题独立OCR精度
                     'score_input': f"{q_config['score_input_pos'][0]},{q_config['score_input_pos'][1]}" if q_config['score_input_pos'] else "",
                     'confirm_button': f"{q_config['confirm_button_pos'][0]},{q_config['confirm_button_pos'][1]}" if q_config['confirm_button_pos'] else "",
                     'next_button_pos': f"{q_config['next_button_pos'][0]},{q_config['next_button_pos'][1]}" if q_config['next_button_pos'] else "",
@@ -383,6 +419,32 @@ class ConfigManager:
     def is_baidu_ocr_mode(self):
         """判断当前是否为百度OCR模式"""
         return self.ocr_mode_index == self.OCR_MODE_BAIDU_OCR
+    
+    @property
+    def ocr_mode(self):
+        """返回OCR模式的内部标识字符串"""
+        return "baidu_ocr" if self.ocr_mode_index == self.OCR_MODE_BAIDU_OCR else "pure_ai"
+    
+    def _smart_recognize_ocr_mode(self, ui_text):
+        """智能识别OCR模式，支持模糊匹配UI文本"""
+        if not ui_text:
+            return "pure_ai"
+        
+        text_lower = ui_text.lower().strip()
+        
+        # 精确匹配内部标识
+        if text_lower in ['pure_ai', 'baidu_ocr']:
+            return text_lower
+        
+        # 模糊匹配中文文本
+        if any(keyword in text_lower for keyword in ['百度', 'baidu', 'ocr', '识别']):
+            return "baidu_ocr"
+        
+        if any(keyword in text_lower for keyword in ['纯ai', 'ai识图', '纯识图']):
+            return "pure_ai"
+        
+        # 默认返回纯AI模式
+        return "pure_ai"
     
     def check_required_settings(self):
         # 简化检查，MainWindow将负责UI层面的验证提示

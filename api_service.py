@@ -76,10 +76,21 @@ from datetime import datetime
 #  这是连接UI显示文本和后台代码的桥梁。
 #  UI上的"火山引擎 (豆包)" 对应到代码里的 "volcengine"。
 #  现在基于 PROVIDER_CONFIGS 动态生成，避免数据冗余。
+#  注意：只包含AI评分模型提供商，不包含OCR服务提供商
 # ==============================================================================
 def generate_ui_text_to_provider_id():
-    """基于 PROVIDER_CONFIGS 动态生成 UI_TEXT_TO_PROVIDER_ID 映射"""
-    return {config["name"]: provider_id for provider_id, config in PROVIDER_CONFIGS.items()}
+    """基于 PROVIDER_CONFIGS 动态生成 UI_TEXT_TO_PROVIDER_ID 映射
+    
+    排除OCR服务提供商（如baidu_ocr），只包含AI评分模型提供商
+    OCR功能是一个独立的工作模式，不应该出现在AI模型选择下拉框中
+    """
+    # OCR服务不是AI评分模型，应该排除
+    OCR_PROVIDERS = {'baidu_ocr'}
+    return {
+        config["name"]: provider_id 
+        for provider_id, config in PROVIDER_CONFIGS.items()
+        if provider_id not in OCR_PROVIDERS
+    }
 
 # ==============================================================================
 #  权威供应商配置字典 (Authoritative Provider Configuration)
@@ -162,12 +173,6 @@ PROVIDER_CONFIGS = {
         "auth_method": "google_api_key_in_url",
         "payload_builder": "_build_gemini_payload",
         "dynamic_url": True,  # 标记需要动态URL替换
-    },
-    "baidu_ocr": { # 百度OCR服务
-        "name": "百度OCR",
-        "url": "https://aip.baidubce.com/rest/2.0/ocr/v1/handwriting",
-        "auth_method": "baidu_ocr_token",
-        "payload_builder": "_build_baidu_ocr_payload",
     }
 }
 
@@ -305,17 +310,22 @@ class ApiService:
             return None, f"API调用失败: {str(e)}"
 
     def test_api_connection(self, api_group: str) -> Tuple[bool, str]:
-        """测试指定API组的连接"""
+        """测试指定API组的连接
+        
+        包括：
+        1. AI评分模型API连接测试
+        2. 百度智能云OCR API连接测试（可选）
+        """
         try:
             if api_group == "first":
                 provider, api_key, model_id, group_name = (
                     self.config_manager.first_api_provider, self.config_manager.first_api_key,
-                    self.config_manager.first_modelID, "第一组"
+                    self.config_manager.first_modelID, "第一个"
                 )
             elif api_group == "second":
                 provider, api_key, model_id, group_name = (
                     self.config_manager.second_api_provider, self.config_manager.second_api_key,
-                    self.config_manager.second_modelID, "第二组"
+                    self.config_manager.second_modelID, "第二个"
                 )
             else:
                 return False, "无效的API组别"
@@ -323,20 +333,57 @@ class ApiService:
             if not all([provider, api_key.strip(), model_id.strip()]):
                 return False, f"{group_name}API配置不完整"
 
-            print(f"[API Test] 测试 {group_name} API, 供应商: {provider}")
+            # 测试AI评分API
+            print(f"[API Test] 测试{group_name}API, 供应商: {provider}")
             result, error = self._execute_api_call(provider, api_key, model_id, img_str="", prompt="你好")
 
             provider_name = PROVIDER_CONFIGS.get(provider, {}).get("name", provider)
-            if result and not error:
-                return True, f"{group_name}API ({provider_name}) 连接成功！"
-            else:
-                enhanced_error = f"{group_name}API ({provider_name}) 连接失败: {error}"
-                suggestion = "\n\n💡 请检查您的API Key、模型ID是否正确，并确保账户有充足余额。"
+            
+            if not (result and not error):
+                enhanced_error = f"❌ {provider_name}: {error}"
+                suggestion = "\n\n💡 请检查API Key、模型ID是否正确，并确保账户有充足余额"
                 return False, enhanced_error + suggestion
+            
+            # AI评分API连接成功，构建结果信息
+            result_info = f"✓ {provider_name}: 连接成功"
+            
+            # 测试百度智能云OCR连接（可选）
+            baidu_ocr_info = self._test_baidu_ocr_connection()
+            if baidu_ocr_info:
+                result_info += f"\n\n{baidu_ocr_info}"
+            
+            return True, result_info
         except Exception as e:
             error_detail = traceback.format_exc()
             print(f"[API Test] API测试过程中发生异常: {str(e)}\n{error_detail}")
             return False, f"API测试异常: {str(e)}"
+
+    def _test_baidu_ocr_connection(self) -> str:
+        """测试百度智能云OCR连接
+        
+        Returns:
+            str: 百度OCR测试结果信息，如果未配置则返回提示信息
+        """
+        baidu_api_key = self.config_manager.baidu_ocr_api_key
+        baidu_secret_key = self.config_manager.baidu_ocr_secret_key
+        
+        # 检查是否配置了百度OCR信息
+        if not baidu_api_key or not baidu_secret_key:
+            return "📌 百度智能云OCR：未配置"
+        
+        # 配置已填写，进行连接测试
+        try:
+            print(f"[API Test] 测试百度智能云OCR连接")
+            result, error = self._execute_api_call("baidu_ocr", baidu_api_key, "", img_str="", prompt="")
+            
+            if result and not error:
+                return "✓ 百度智能云OCR：连接成功"
+            else:
+                return f"❌ 百度智能云OCR：{error}\n💡 请检查API Key和Secret Key是否正确，且账户有充足余额"
+        except Exception as e:
+            error_detail = traceback.format_exc()
+            print(f"[API Test] 百度OCR测试异常: {str(e)}\n{error_detail}")
+            return f"❌ 百度智能云OCR：{str(e)}"
 
     def _preprocess_api_key(self, api_key: str, auth_method: str) -> Tuple[str, Optional[str]]:
         """

@@ -235,7 +235,7 @@ class Application:
         self.app = QApplication(sys.argv)
         self.config_manager = ConfigManager()
         self.api_service = ApiService(self.config_manager)
-        self.worker = GradingThread(self.api_service)
+        self.worker = GradingThread(self.api_service, self.config_manager)
         self.main_window = MainWindow(self.config_manager, self.api_service, self.worker)
         self.signal_manager = SignalConnectionManager()
 
@@ -658,19 +658,10 @@ class Application:
 
             # --- 2. 动态构建表头和行 ---
             is_dual = record_data.get('is_dual_evaluation', False)
-            timestamp_raw = record_data.get('timestamp', '')
-            if '_' in timestamp_raw:
-                time_part = timestamp_raw.split('_')[1]
-                if len(time_part) == 6:
-                    timestamp_str = f"{time_part[:2]}点{time_part[2:4]}分{time_part[4:6]}秒"
-                else:
-                    timestamp_str = time_part
-            else:
-                timestamp_str = timestamp_raw
             question_index_str = f"题目{record_data.get('question_index', 0)}"
             final_total_score_str = str(record_data.get('total_score', 0))
 
-            headers = ["时间", "题目编号"]
+            headers = ["题目编号"]
             rows_to_write = []
 
             if is_dual:
