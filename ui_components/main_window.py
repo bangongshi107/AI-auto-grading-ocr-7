@@ -1,4 +1,4 @@
-﻿# --- START OF FILE main_window.py ---
+# --- START OF FILE main_window.py ---
 
 import sys
 import os
@@ -43,7 +43,7 @@ class MainWindow(QMainWindow):
             base_path = sys._MEIPASS  # type: ignore
         else:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        ui_path = os.path.join(base_path, "setting", "八题.ui")
+        ui_path = os.path.join(base_path, "setting", "七题.ui")
         uic.loadUi(ui_path, self)
 
         # ... (其他初始化属性保持不变) ...
@@ -1107,8 +1107,6 @@ class MainWindow(QMainWindow):
         test_btn = self.get_ui_element('api_test_button')
         if test_btn and isinstance(test_btn, QPushButton):
             test_btn.clicked.connect(self.test_api_connections)
-            # 将“测试API连接”按钮颜色调为介于之前和当前之间的颜色（仅修改视觉）
-            test_btn.setStyleSheet("background-color: #D6ECFF; color: #0b3a5a;")
         
         # 支持7道题的配置按钮
         for i in range(1, self.max_questions + 1):

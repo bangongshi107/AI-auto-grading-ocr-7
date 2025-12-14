@@ -397,7 +397,7 @@ QScrollBar::sub-line:horizontal {
              <string/>
             </property>
             <property name="placeholderText">
-             <string>AI视觉模型/ID</string>
+             <string>AI模型/ID</string>
             </property>
            </widget>
           </item>
@@ -633,7 +633,7 @@ QScrollBar::sub-line:horizontal {
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>AI视觉模型/ID（此AI仅双评启用）</string>
+             <string>AI模型/ID（此AI仅双评启用）</string>
             </property>
            </widget>
           </item>
@@ -745,7 +745,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -892,7 +892,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -1039,7 +1039,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -1186,7 +1186,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -1333,7 +1333,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -1480,7 +1480,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -1627,7 +1627,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
@@ -1774,7 +1774,7 @@ QScrollBar::sub-line:horizontal {
                 </property>
                 <item>
                  <property name="text">
-                  <string>纯AI识图阅卷</string>
+                  <string>纯AI识图阅卷  必须视觉AI</string>
                  </property>
                 </item>
                 <item>
