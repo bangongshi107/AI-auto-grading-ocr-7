@@ -1031,10 +1031,23 @@ class QuestionConfigDialog(QDialog):
         """根据三步打分模式复选框状态，切换UI元素的启用/禁用和显示/隐藏"""
         if self.question_index != 1:  # 确保只对第一题操作
             return
-            
-        # 当启用三步打分时，自动设置满分上限为60（高中作文默认）
+        # 当启用三步打分时，确保给分上限不超过60（但不盲目覆盖用户原有较小的设置）
         if checked:
-            self.max_score_edit.setValue(60)  # 三步打分默认60分
+            # 限制用户可设置的最大值为60
+            try:
+                self.max_score_edit.setMaximum(60)
+            except Exception:
+                pass
+            # 如果当前用户设置的上限超过60，则将其降到60并记录日志
+            if self.max_score_edit.value() > 60:
+                self.max_score_edit.setValue(60)
+                self._log_message("启用三步打分：给分上限超过60，已自动限制为60。")
+        else:
+            # 取消三步打分时，恢复上限为默认的较大值（例如150）以便用户调整
+            try:
+                self.max_score_edit.setMaximum(150)
+            except Exception:
+                pass
 
         # 切换原有单点分数输入组的启用/显示状态
         if self.original_score_input_group:
