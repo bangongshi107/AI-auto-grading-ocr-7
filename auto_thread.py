@@ -434,6 +434,38 @@ class GradingThread(QThread):
         except Exception as e:
             self.log_signal.emit(f"清理临时资源时出错: {str(e)}", False, "WARNING")
 
+    def _is_transient_error(self, error_msg) -> bool:
+        """判断错误信息是否为短暂/可重试的网络/超时/token类错误。
+
+        仅当该函数返回 True 时，重试一次；否则视为不可恢复的业务/配置错误，立即要求人工介入。
+        """
+        if not error_msg:
+            return False
+        try:
+            s = str(error_msg).lower()
+        except Exception:
+            return False
+
+        # 常见超时/网络关键字
+        if '超时' in s or '请求超时' in s or 'timeout' in s or 'timed out' in s:
+            return True
+        if '无法连接' in s or '连接失败' in s or '无法连接到' in s or 'connection' in s or 'connectionerror' in s or 'connection error' in s:
+            return True
+
+        # token / access_token 相关（允许重试以尝试刷新token）
+        if 'token' in s or 'access_token' in s or 'token获取' in s or 'token获取异常' in s or 'access token' in s:
+            return True
+
+        # 限流/429 一般可短暂重试
+        if '429' in s or '限流' in s or 'rate limit' in s:
+            return True
+
+        # 401/403 通常为鉴权失败，但如果错误信息里含有 token 相关字样，则视作token问题可重试
+        if ('401' in s or '403' in s or '认证失败' in s or '鉴权' in s) and ('token' in s or 'access_token' in s):
+            return True
+
+        return False
+
     def _set_error_state(self, reason):
         """统一设置错误状态（线程安全）"""
         with self._state_lock:
@@ -1012,11 +1044,39 @@ class GradingThread(QThread):
                 except Exception as e_pre:
                     self.log_signal.emit(f"OCR预处理失败，使用原图进行识别: {str(e_pre)}", True, "WARNING")
             
-            # 调用百度DocAnalysis接口，获取结构化结果
-            data, error = self.api_service.call_baidu_doc_analysis_structured(img_str)
-            if error:
-                self.log_signal.emit(f"OCR识别失败: {error}", True, "WARNING")
-                return "", {'manual_intervention': True, 'reason': f'OCR接口错误: {error}'}
+            # 调用百度“手写文字识别”接口（保持旧方法名以兼容历史逻辑）
+            # 传入 OCR 精度等级：strict 会启用 small 粒度
+            data = None
+            error = None
+            # 尝试至多两次（初次 + 最多一次重试），超出则要求人工介入
+            max_ocr_attempts = 2
+            for ocr_attempt in range(max_ocr_attempts):
+                try:
+                    try:
+                        data, error = self.api_service.call_baidu_doc_analysis_structured(img_str, ocr_quality_level=ocr_quality_level)
+                    except TypeError:
+                        # 兼容旧版本 ApiService（如果用户回滚文件）
+                        data, error = self.api_service.call_baidu_doc_analysis_structured(img_str)
+                except Exception as e:
+                    data, error = None, f"调用百度OCR异常: {str(e)}"
+                if error or not data:
+                    transient = self._is_transient_error(error)
+                    # 非短暂错误（如配置/业务/格式错误）不重试，直接要求人工介入
+                    if not transient:
+                        self.log_signal.emit(f"OCR识别失败（不可重试）: {error or '返回空数据'}", True, "ERROR")
+                        return "", {'manual_intervention': True, 'reason': f'OCR不可恢复错误: {error or "返回空数据"}'}
+
+                    # 短暂错误且尚可重试
+                    if ocr_attempt < max_ocr_attempts - 1:
+                        self.log_signal.emit(f"OCR识别尝试{ocr_attempt+1}/{max_ocr_attempts}失败（网络/超时/token问题）: {error or '返回空数据'}，将重试一次", True, "WARNING")
+                        time.sleep(1)
+                        continue
+                    else:
+                        # 最后一次尝试仍失败，要求人工介入
+                        self.log_signal.emit(f"OCR识别失败（已重试{max_ocr_attempts-1}次）: {error or '返回空数据'}", True, "ERROR")
+                        return "", {'manual_intervention': True, 'reason': f'OCR接口错误（已重试{max_ocr_attempts-1}次）: {error or "返回空数据"}'}
+                else:
+                    break
 
             if not data:
                 return "", {'manual_intervention': True, 'reason': 'OCR返回空数据'}
@@ -1070,6 +1130,12 @@ class GradingThread(QThread):
                         prob_block = item.get('probability')
                     
                     # 置信度必须存在（对于有效识别）
+                    # 兼容：少数情况下接口可能返回顶层 probability（若出现则兜底使用）
+                    if prob_block is None and isinstance(data, dict):
+                        top_prob = data.get('probability')
+                        if isinstance(top_prob, dict):
+                            prob_block = top_prob
+
                     if prob_block is None:
                         raise ValueError("本行OCR数据中不存在置信度信息")
                     
@@ -1331,7 +1397,7 @@ class GradingThread(QThread):
             }
 
 
-    def _call_and_process_single_api(self, api_call_func, img_str, prompt, q_config, api_name="API", max_retries=3, ocr_text=""):
+    def _call_and_process_single_api(self, api_call_func, img_str, prompt, q_config, api_name="API", max_retries=2, ocr_text=""):
         """
         调用指定的API函数，并处理其响应。支持重试机制以提高稳定性，包括JSON解析失败的重试。
 
@@ -1341,7 +1407,7 @@ class GradingThread(QThread):
             prompt: 提示词
             q_config: 当前题目配置
             api_name: 用于日志的API名称
-            max_retries: 最大重试次数，默认3次
+            max_retries: 最大重试次数，默认2次（最多重试一次）
             ocr_text: OCR识别的文本，用于辅助评分
 
         Returns:
@@ -1360,12 +1426,19 @@ class GradingThread(QThread):
             response_text, error_from_call = api_call_func(img_str, prompt, ocr_text)
 
             if error_from_call or not response_text:
+                transient = self._is_transient_error(error_from_call)
                 error_msg = f"{api_name}调用失败或响应为空: {error_from_call}"
+                # 如果不是短暂错误，则不重试，直接返回要求人工介入/停止
+                if not transient:
+                    self.log_signal.emit(error_msg, True, "ERROR")
+                    return None, None, None, None, response_text, error_msg
+
+                # 是短暂错误，按现有重试逻辑尝试
                 if attempt == max_retries - 1:  # 最后一次尝试失败
                     self.log_signal.emit(error_msg, True, "ERROR")
                     return None, None, None, None, response_text, error_msg
                 else:
-                    self.log_signal.emit(f"{error_msg}，准备重试...", True, "ERROR")
+                    self.log_signal.emit(f"{error_msg}（网络/超时/token问题），准备重试...", True, "ERROR")
                     continue
 
             success, result_data = self.process_api_response((response_text, None), q_config)
@@ -1393,6 +1466,7 @@ class GradingThread(QThread):
                     return None, None, None, None, response_text, error_msg
 
                 if is_json_parse_error:
+                    # JSON解析错误通常是模型输出格式问题（业务级），不宜再重试以避免浪费调用次数。
                     # 兼容tuple和dict两种格式以获得错误信息与原始响应
                     if isinstance(error_info, tuple):
                         error_msg = error_info[1] if len(error_info) > 1 else str(error_info)
@@ -1401,17 +1475,13 @@ class GradingThread(QThread):
                         error_msg = error_info.get('message', str(error_info))
                         raw_response = error_info.get('raw_response', response_text)
 
-                    if attempt == max_retries - 1:  # 最后一次尝试的JSON解析失败
-                        final_error_msg = f"{api_name}JSON解析失败（已重试{max_retries}次）。错误: {error_msg}"
-                        self.log_signal.emit(final_error_msg, True, "ERROR")
-                        return None, None, None, None, raw_response, final_error_msg
-                    else:
-                        self.log_signal.emit(f"{api_name}JSON解析失败: {error_msg}，重新调用API...", True, "ERROR")
-                        continue  # 重试API调用
+                    final_error_msg = f"{api_name}JSON解析失败（不重试以避免浪费调用）: {error_msg}"
+                    self.log_signal.emit(final_error_msg, True, "ERROR")
+                    return None, None, None, None, raw_response, final_error_msg
                 else:
                     # 其他类型的处理失败
                     if attempt == max_retries - 1:  # 最后一次尝试的处理失败
-                        error_msg = f"{api_name}评分处理失败（已重试{max_retries}次）。错误: {error_info}"
+                        error_msg = f"{api_name}评分处理失败（已重试{max_retries-1}次）。错误: {error_info}"
                         self.log_signal.emit(error_msg, True, "ERROR")
                         return None, None, None, None, response_text, error_msg
                     else:

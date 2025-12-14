@@ -70,6 +70,7 @@ import hmac
 import time
 import json
 from datetime import datetime
+from threading import Lock
 
 # ==============================================================================
 #  UI文本到提供商ID的映射字典 (UI Text to Provider ID Mapping)
@@ -142,6 +143,12 @@ PROVIDER_CONFIGS = {
         "auth_method": "bearer",
         "payload_builder": "_build_openai_compatible_payload",
     },
+    "baidu_ocr": {
+        "name": "百度智能云OCR(手写)",
+        "url": "https://aip.baidubce.com/rest/2.0/ocr/v1/handwriting",
+        "auth_method": "baidu_ocr_token",
+        "payload_builder": "_build_baidu_ocr_payload",
+    },
     "tencent": {
         "name": "腾讯混元",
         "url": "https://hunyuan.tencentcloudapi.com/",
@@ -199,6 +206,78 @@ class ApiService:
         self.logger = logging.getLogger(__name__)
         # 初始化当前题目索引，虽然主要逻辑在AutoThread中，但这里有个默认值更安全
         self.current_question_index = 1
+
+        # 百度OCR access_token 缓存（自动化：用户无需参与）
+        self._baidu_ocr_token_lock = Lock()
+        # 尝试从持久化配置中加载（如果配置文件里存在）
+        try:
+            self._baidu_ocr_access_token: Optional[str] = getattr(self.config_manager, 'baidu_ocr_access_token', None) or None
+            self._baidu_ocr_token_expires_at: float = float(getattr(self.config_manager, 'baidu_ocr_token_expires_at', 0.0) or 0.0)
+        except Exception:
+            self._baidu_ocr_access_token = None
+            self._baidu_ocr_token_expires_at = 0.0
+
+    def _get_baidu_ocr_access_token(self) -> Tuple[Optional[str], Optional[str]]:
+        """获取百度OCR access_token（带缓存与自动刷新）。
+
+        Returns:
+            (access_token, error_message)
+        """
+        api_key = getattr(self.config_manager, 'baidu_ocr_api_key', '')
+        secret_key = getattr(self.config_manager, 'baidu_ocr_secret_key', '')
+        if not api_key or not str(api_key).strip() or not secret_key or not str(secret_key).strip():
+            return None, "百度OCR未配置：请在UI中填写 baidu_ocr_api_key 和 baidu_ocr_secret_key"
+
+        now = time.time()
+        with self._baidu_ocr_token_lock:
+            # 支持通过配置调整提前刷新 margin（秒）
+            try:
+                margin = int(getattr(self.config_manager, 'baidu_ocr_token_refresh_margin', 60) or 60)
+            except Exception:
+                margin = 60
+            if self._baidu_ocr_access_token and now < (self._baidu_ocr_token_expires_at - margin):
+                return self._baidu_ocr_access_token, None
+
+            token_url = "https://aip.baidubce.com/oauth/2.0/token"
+            token_params = {
+                "grant_type": "client_credentials",
+                "client_id": str(api_key).strip(),
+                "client_secret": str(secret_key).strip(),
+            }
+
+            try:
+                self.logger.debug("准备获取百度OCR access_token")
+                token_response = self.session.post(token_url, data=token_params, timeout=10)
+                token_data = token_response.json()
+
+                access_token = token_data.get("access_token")
+                expires_in = token_data.get("expires_in")
+                if not access_token:
+                    return None, f"获取百度OCR access_token失败: {token_data}"
+
+                try:
+                    expires_in_sec = int(expires_in) if expires_in is not None else 0
+                except Exception:
+                    expires_in_sec = 0
+
+                self._baidu_ocr_access_token = str(access_token)
+                # 如果 expires_in 缺失，保守设置为 25 分钟
+                self._baidu_ocr_token_expires_at = now + (expires_in_sec if expires_in_sec > 0 else 1500)
+                # 持久化到配置（best-effort），以便重启后可复用
+                try:
+                    self.config_manager.baidu_ocr_access_token = self._baidu_ocr_access_token
+                    self.config_manager.baidu_ocr_token_expires_at = self._baidu_ocr_token_expires_at
+                    # 使用已有的保存方法写入文件
+                    try:
+                        self.config_manager._save_config_to_file()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                return self._baidu_ocr_access_token, None
+            except Exception as e:
+                self.logger.exception("百度OCR token获取异常")
+                return None, f"百度OCR token获取异常: {str(e)}"
 
     # ==========================================================================
     #  腾讯云签名方法 v3 实现 (Tencent Cloud Signature Method v3)
@@ -398,15 +477,13 @@ class ApiService:
         if not baidu_api_key or not baidu_secret_key:
             return "📌 百度智能云OCR：未配置"
         
-        # 配置已填写，进行连接测试
+        # 配置已填写，进行连接测试：仅测试 token 获取（OCR接口必须传 image，不能用空请求测试）
         try:
-            print(f"[API Test] 测试百度智能云OCR连接")
-            result, error = self._execute_api_call("baidu_ocr", baidu_api_key, "", img_str="", prompt="")
-            
-            if result and not error:
-                return "✓ 百度智能云OCR：连接成功"
-            else:
-                return f"❌ 百度智能云OCR：{error}\n💡 请检查API Key和Secret Key是否正确，且账户有充足余额"
+            print(f"[API Test] 测试百度智能云OCR连接（token鉴权）")
+            token, err = self._get_baidu_ocr_access_token()
+            if token and not err:
+                return "✓ 百度智能云OCR：连接成功（access_token获取成功）"
+            return f"❌ 百度智能云OCR：{err}\n💡 请检查API Key和Secret Key是否正确，且账户有充足余额"
         except Exception as e:
             error_detail = traceback.format_exc()
             print(f"[API Test] 百度OCR测试异常: {str(e)}\n{error_detail}")
@@ -566,31 +643,12 @@ class ApiService:
             headers["X-TC-Action"] = action
             headers["X-TC-Region"] = region
         elif auth_method == "baidu_ocr_token":
-            # 百度OCR Token鉴权 - 基于用户教程
-            # 获取Access Token
-            token_url = "https://aip.baidubce.com/oauth/2.0/token"
-            token_params = {
-                "grant_type": "client_credentials",
-                "client_id": processed_key,  # API Key
-                "client_secret": self.config_manager.baidu_ocr_secret_key  # Secret Key
-            }
-
-            try:
-                self.logger.debug("准备获取百度OCR Access Token")
-                token_response = self.session.post(token_url, data=token_params, timeout=10)
-                token_data = token_response.json()
-
-                if "access_token" in token_data:
-                    access_token = token_data["access_token"]
-                    # 添加到URL参数中
-                    url += f"?access_token={access_token}"
-                    self.logger.debug("百度OCR Access Token 获取成功")
-                else:
-                    self.logger.warning(f"百度OCR Token返回结果不包含access_token: {token_data}")
-                    return None, f"获取百度OCR Access Token失败: {token_data}"
-            except Exception as e:
-                self.logger.exception("百度OCR Token获取异常")
-                return None, f"百度OCR Token获取异常: {str(e)}"
+            # 百度OCR Token鉴权 - 自动获取并缓存 access_token
+            access_token, token_err = self._get_baidu_ocr_access_token()
+            if token_err:
+                return None, token_err
+            sep = "&" if "?" in url else "?"
+            url += f"{sep}access_token={access_token}"
 
         # 通用请求发送逻辑（所有认证方式共享）
         try:
@@ -697,57 +755,63 @@ class ApiService:
         return str(data) # Fallback
 
     # 新: 专用方法用于获取百度 doc_analysis 的原始结构化结果（便于置信度分析）
-    def call_baidu_doc_analysis_structured(self, img_str: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def call_baidu_doc_analysis_structured(self, img_str: str, ocr_quality_level: str = 'moderate', language_type: str = 'CHN_ENG') -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """
-        调用百度doc_analysis接口并返回未被处理的JSON结构，便于分析每行置信度等信息。
+        调用百度“手写文字识别”接口并返回未被处理的JSON结构，便于分析每行置信度等信息。
+
+        说明：历史上该方法名为 doc_analysis，但当前项目的“学生手写答案截图”场景
+        更适配百度最新的 handwriting 接口，因此这里保持方法名不变以兼容旧调用。
         Returns: (data_dict, error_message)
         """
         try:
-            # token 获取
-            token_url = "https://aip.baidubce.com/oauth/2.0/token"
-            token_params = {
-                "grant_type": "client_credentials",
-                "client_id": self.config_manager.baidu_ocr_api_key,
-                "client_secret": self.config_manager.baidu_ocr_secret_key
-            }
-            token_response = self.session.post(token_url, data=token_params, timeout=10)
-            token_data = token_response.json()
-            if "access_token" not in token_data:
-                return None, f"获取百度OCR access_token失败: {token_data}"
-            access_token = token_data["access_token"]
+            # 统一走显式 handwriting 调用（含 strict 粒度映射）
+            return self.call_baidu_handwriting_structured(
+                img_str,
+                ocr_quality_level=ocr_quality_level,
+                language_type=language_type,
+            )
+        except Exception as e:
+            self.logger.exception("调用百度手写识别接口异常")
+            return None, f"调用百度手写识别接口异常: {str(e)}"
 
-            # doc_analysis endpoint
-            url = "https://aip.baidubce.com/rest/2.0/ocr/v1/doc_analysis"
+    def call_baidu_handwriting_structured(self, img_str: str, ocr_quality_level: str = 'moderate', language_type: str = 'CHN_ENG') -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """显式调用百度手写识别接口并返回结构化结果。
+
+        Args:
+            img_str: base64编码图片字符串（可含 data:image/...;base64, 前缀）
+            ocr_quality_level: relaxed/moderate/strict（strict 会启用 small 粒度以便返回 chars/candidates）
+            language_type: 百度OCR language_type
+        """
+        try:
+            access_token, token_err = self._get_baidu_ocr_access_token()
+            if token_err:
+                return None, token_err
+
+            url = "https://aip.baidubce.com/rest/2.0/ocr/v1/handwriting"
             url += f"?access_token={access_token}"
 
+            raw_level = str(ocr_quality_level).strip()
+            level_lower = raw_level.lower()
+            # 兼容：内部值 strict / UI中文“严格”
+            is_strict = (level_lower == "strict") or (raw_level == "严格")
+            granularity = "small" if is_strict else "big"
             pure_base64 = self._get_pure_base64(img_str)
-            # 🎯 优化后的参数配置（v2.0 - 2025-12-12）
-            # - 输入：经过预处理的手写答案图像（灰度化+二值化+去噪）
-            # - 目标：准确识别手写内容，忽略涂改部分
-            # - 策略：纯文本识别+质量检测，质量差时人工介入
-            # - 优化：移除无效参数，减少API调用开销
             payload = {
                 "image": pure_base64,
-                "language_type": "CHN_ENG",      # 中英文混合
-                "result_type": "big",             # 行级结果（已足够精确）
-                "words_type": "handprint_mix",   # 明确指定手写印刷混排模式
-                "line_probability": True,         # ✅ 必需：置信度检测
-                "recg_alter": True,               # ✅ 必需：涂改检测（用于完全忽略涂改行）
-                # ✅ 优化说明：已移除无效参数
-                # - detect_direction: 答题卡方向已固定，无需检测
-                # - detect_language: 已明确指定CHN_ENG，无需额外检测
-                # - layout_analysis: 已框定答案区域，不需要版面分析
-                # - recg_formula/recg_long_division: 暂不使用特殊格式识别
+                "language_type": language_type,
+                "recognize_granularity": granularity,
+                "probability": "true",
+                "detect_direction": "true",
+                "detect_alteration": "true",
             }
-
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
             response = self.session.post(url, headers=headers, data=payload, timeout=30)
             if response.status_code != 200:
-                return None, f"百度DocAnalysis请求失败: {response.status_code} {response.text[:200]}"
+                return None, f"百度Handwriting请求失败: {response.status_code} {response.text[:200]}"
             return response.json(), None
         except Exception as e:
-            self.logger.exception("调用百度文档分析接口异常")
-            return None, f"调用百度文档分析接口异常: {str(e)}"
+            self.logger.exception("调用百度手写识别接口异常")
+            return None, f"调用百度手写识别接口异常: {str(e)}"
 
     def _get_pure_base64(self, img_str: str) -> str:
         if not img_str: return ""
@@ -964,10 +1028,11 @@ class ApiService:
         pure_base64 = self._get_pure_base64(img_str)
         return {
             "image": pure_base64,
-            "language_type": "CHN_ENG",  # 中英文混合
-            "detect_direction": "true",   # 检测图像朝向
-            "detect_language": "true",    # 检测语言
-            "probability": "true"        # 返回识别结果中每一行的置信度
+            "language_type": "CHN_ENG",           # 默认中英文混合
+            "recognize_granularity": "big",       # 默认行级；strict模式在 structured 调用里会切换为 small
+            "probability": "true",                # 返回每行置信度
+            "detect_direction": "true",           # 检测图像朝向
+            "detect_alteration": "true"           # 检测涂改（返回“☰”）
         }
 
     def _create_api_error_message(self, provider: str, status_code: int, response_text: str) -> str:

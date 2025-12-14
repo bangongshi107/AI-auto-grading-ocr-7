@@ -2,9 +2,9 @@
 
 from typing import Optional, Any
 from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                            QLineEdit, QPushButton, QCheckBox, QGroupBox,
+                            QLineEdit, QPushButton, QCheckBox,
                             QComboBox, QTextEdit, QSpinBox, QMessageBox,
-                            QMainWindow, QWidget)
+                            QMainWindow, QWidget, QSizePolicy)
 from PyQt5.QtCore import Qt, QPoint, QRect, pyqtSignal, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QPaintEvent, QCloseEvent, QShowEvent
 import pyautogui
@@ -131,7 +131,7 @@ class MyWindow2(QMainWindow):
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
         
         font = QFont("微软雅黑")
-        # 让提示文字跟随本窗口字号（题目配置相关界面固定为 10）
+        # 让提示文字跟随本窗口字号（题目配置相关界面固定为 11）
         try:
             base_font = self.font()
             if base_font and base_font.pointSize() > 0:
@@ -317,22 +317,22 @@ class QuestionConfigDialog(QDialog):
 
         # 新增三步打分相关UI元素（仅第一题使用）
         self.three_step_scoring_checkbox: Optional[QCheckBox] = None
-        self.score_input_group_step1: Optional[QGroupBox] = None # QGroupBox for step1
+        self.score_input_group_step1: Optional[QWidget] = None # QWidget for step1
         self.score_x_edit_step1: Optional[QSpinBox] = None
         self.score_y_edit_step1: Optional[QSpinBox] = None
         self.set_pos_button_step1: Optional[QPushButton] = None
         # ... (为 step2 和 step3 添加类似的变量)
-        self.score_input_group_step2: Optional[QGroupBox] = None
+        self.score_input_group_step2: Optional[QWidget] = None
         self.score_x_edit_step2: Optional[QSpinBox] = None
         self.score_y_edit_step2: Optional[QSpinBox] = None
         self.set_pos_button_step2: Optional[QPushButton] = None
-        self.score_input_group_step3: Optional[QGroupBox] = None
+        self.score_input_group_step3: Optional[QWidget] = None
         self.score_x_edit_step3: Optional[QSpinBox] = None
         self.score_y_edit_step3: Optional[QSpinBox] = None
         self.set_pos_button_step3: Optional[QPushButton] = None
 
         # 原有的单点分数输入组也需要一个引用，方便控制其启用/禁用
-        self.original_score_input_group: Optional[QGroupBox] = None
+        self.original_score_input_group: Optional[QWidget] = None
         self.question_type_combo: Optional[QComboBox] = None # 新增题目类型下拉框成员变量
 
         # 在 self.init_ui() 之前添加
@@ -340,7 +340,7 @@ class QuestionConfigDialog(QDialog):
 
         self.init_ui()
 
-    def _apply_font_size(self, font_size: int = 10) -> None:
+    def _apply_font_size(self, font_size: int = 11) -> None:
         """
         为此对话框及其所有子控件统一应用字体大小。
         
@@ -348,7 +348,7 @@ class QuestionConfigDialog(QDialog):
         只需修改此方法的参数即可全局改变对话框字号。
         
         Args:
-            font_size: 字体大小（单位：磅），默认为 10
+            font_size: 字体大小（单位：磅），默认为 11
         """
         font = QFont("微软雅黑", font_size)
         self.setFont(font)
@@ -388,17 +388,24 @@ class QuestionConfigDialog(QDialog):
         # --- CRITICAL FIX: 移除 Qt.WindowStaysOnTopHint ---
         # 移除这个标志，以避免它遮挡新弹出的答案框选窗口
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint)  # type: ignore
-        self.resize(400, 500) # 恢复用户指定的固定大小
+        # 缩窄对话框并减少高度以获得更紧凑的垂直布局
+        self.resize(450, 440)
+        # 强制最大宽度，确保对话框在不同平台上保持较窄的视觉效果
+        try:
+            self.setFixedWidth(450)
+        except Exception:
+            pass
         
         # 主布局
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(4)
-        main_layout.setContentsMargins(8, 6, 8, 6)
-        self._compact_layout(main_layout, spacing=4, margins=(6, 4, 6, 4))
+        # 更紧凑的垂直间距
+        main_layout.setSpacing(2)
+        main_layout.setContentsMargins(6, 2, 6, 2)
+        self._compact_layout(main_layout, spacing=2, margins=(4, 2, 4, 2))
         
         # --- 1. 分数设置组 ---
-        score_group = QGroupBox("")
-        score_group_content_layout = QHBoxLayout() 
+        score_group = QWidget()
+        score_group_content_layout = QHBoxLayout()
         self._compact_layout(score_group_content_layout)
         
         score_group_content_layout.addWidget(QLabel("给分上限:"))
@@ -407,7 +414,7 @@ class QuestionConfigDialog(QDialog):
         self.max_score_edit.setMaximum(150)
         self.max_score_edit.setValue(self.question_config.get('max_score', 150) if self.question_config else 150)
         score_group_content_layout.addWidget(self.max_score_edit)
-        score_group_content_layout.addSpacing(50) # 添加伸缩空间
+        score_group_content_layout.addSpacing(20) # 减少水平伸缩空间以缩窄整体宽度
         
         score_group_content_layout.addWidget(QLabel("给分下限："))
         self.min_score_edit = QSpinBox()
@@ -420,36 +427,69 @@ class QuestionConfigDialog(QDialog):
         main_layout.addWidget(score_group)
 
         # --- 新增：题目类型选择 ---
-        question_type_group = QGroupBox("") # 可以给它一个组标题
+        question_type_group = QWidget() # 可以给它一个组标题
         question_type_layout = QHBoxLayout()
         self._compact_layout(question_type_layout)
 
+        # 创建带图标与重要徽章的题型选择行
         self.question_type_combo = QComboBox()
+        # 不使用占位项，直接列出题型选项
         # 定义题目类型选项 (键: 内部标识符, 值: UI显示文本)
         self.question_types_map = {
-            "Subjective_PointBased_QA": "主观题-按点给分，强调答案命中得分点",
-            "Objective_FillInTheBlank": "较客观的主观题-填空题",
-            "Formula_Proof_StepBased": "理科公式计算/证明题：强调步骤、逻辑、符号规范",
-            "Holistic_Evaluation_Open": "文科开放题-依据评分细则中的宏观标准进行综合判断"
+            "Subjective_PointBased_QA": "主观题  -  按点给分，强调答案命中得分点",
+            "Objective_FillInTheBank": "较客观的主观题  -  填空题",
+            "Formula_Proof_StepBased": "理科公式计算/证明题：步骤、逻辑、符号",
+            "Holistic_Evaluation_Open": "文科开放题  -  宏观标准 综合判断（作文）"
         }
         for display_text in self.question_types_map.values():
             self.question_type_combo.addItem(display_text)
 
-        # 加载当前配置的题目类型
+        # 加载当前配置的题目类型（查找对应显示文本）
         current_type_identifier = self.question_config.get('question_type', 'Subjective_PointBased_QA')
-        current_display_text = "主观题-按点给分" # 默认显示
+        current_display_text = None
         for identifier, display in self.question_types_map.items():
             if identifier == current_type_identifier:
                 current_display_text = display
                 break
 
-        current_index = self.question_type_combo.findText(current_display_text)
-        if current_index != -1:
-            self.question_type_combo.setCurrentIndex(current_index)
+        if current_display_text:
+            current_index = self.question_type_combo.findText(current_display_text)
+            if current_index != -1:
+                self.question_type_combo.setCurrentIndex(current_index)
+        else:
+            # 如果没有配置，选择第一个题型项（索引0）
+            if self.question_type_combo.count() > 0:
+                self.question_type_combo.setCurrentIndex(0)
 
+        # 右侧重要徽章
+        required_badge = QLabel("重要")
+        # 更紧凑的徽章样式：减小字体与垂直内边距
+        required_badge.setStyleSheet("background-color: #FF5555; color: white; padding:1px 6px; border-radius:8px; font-size:11pt; font-weight:bold;")
+        # 使用固定高度并设置为固定尺寸策略，保证与下拉框垂直居中对齐
+        required_badge.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        try:
+            combo_h = self.question_type_combo.sizeHint().height()
+            required_badge.setFixedHeight(combo_h)
+        except Exception:
+            required_badge.setFixedHeight(20)
+
+        # 初始样式：较大高度、内边距、橙色边框
+        base_combo_style = "min-height:22px; padding:3px; border:2px solid #FF8C00; border-radius:4px;"
+        self.question_type_combo.setStyleSheet(base_combo_style)
+
+        # 将组件加入布局（下拉 + 徽章）
         question_type_layout.addWidget(self.question_type_combo)
+        question_type_layout.addWidget(required_badge)
         question_type_group.setLayout(question_type_layout)
         main_layout.addWidget(question_type_group)
+
+        # 连接信号：选择变化时更新样式（仅用于保持边框样式可扩展）
+        self.question_type_combo.currentIndexChanged.connect(self.update_question_type_style)
+        # 触发一次以应用初始样式
+        try:
+            self.update_question_type_style()
+        except Exception:
+            pass
         # --- 结束新增 ---
 
         # --- 2. 分数输入位置设置 ---
@@ -466,11 +506,11 @@ class QuestionConfigDialog(QDialog):
 
         # --- 3. 三步分数输入模式 (仅第一题) ---
         if self.question_index == 1:
-            three_step_group = QGroupBox("")
+            three_step_group = QWidget()
             three_step_group_main_layout = QVBoxLayout() 
             self._compact_layout(three_step_group_main_layout)
 
-            self.three_step_scoring_checkbox = QCheckBox("60'作文专用，分数分3份输入3个位置 (仅当第一题可用）")
+            self.three_step_scoring_checkbox = QCheckBox("60'作文专用，分数分3份输入3个位置 (仅当第1题）")
             enable_three_step_from_config = self.question_config.get('enable_three_step_scoring', False)
             self.three_step_scoring_checkbox.setChecked(enable_three_step_from_config)
 
@@ -521,7 +561,7 @@ class QuestionConfigDialog(QDialog):
 
 
         # --- 4. 提交按钮位置设置 ---
-        submit_group = QGroupBox("")
+        submit_group = QWidget()
         submit_group_content_layout = QHBoxLayout() 
         self._compact_layout(submit_group_content_layout)
         
@@ -546,7 +586,7 @@ class QuestionConfigDialog(QDialog):
         main_layout.addWidget(submit_group)
         
         # --- 5. 翻页按钮配置 ---
-        next_group = QGroupBox("")
+        next_group = QWidget()
         next_group_main_layout = QVBoxLayout() 
         self._compact_layout(next_group_main_layout)
         
@@ -582,7 +622,7 @@ class QuestionConfigDialog(QDialog):
         self.toggle_next_button_fields(self.enable_next_check.isChecked()) 
         
         # --- 6. 答案区域配置 (恢复到旧版对称布局) ---
-        answer_group = QGroupBox("") # 确保 answer_group 已定义
+        answer_group = QWidget() # 确保 answer_group 已定义
         answer_group_main_layout = QVBoxLayout()
         self._compact_layout(answer_group_main_layout)
 
@@ -654,10 +694,26 @@ class QuestionConfigDialog(QDialog):
         # current_width = self.width()
         # self.setMinimumWidth(max(600, current_width))
 
+    def update_question_type_style(self):
+        """根据当前选择更新题型下拉框的边框颜色与样式。
+
+        - 当选择为占位项（索引0）时，显示红色边框以提示用户必须选择。
+        - 否则显示橙色/默认边框。
+        """
+        try:
+            # 始终使用橙色高对比边框以保持视觉一致性
+            border_color = '#FF8C00'
+            style = f"min-height:28px; padding:4px; border:2px solid {border_color}; border-radius:4px;"
+            # Guard against optional member being None to satisfy static type checkers
+            if self.question_type_combo is not None:
+                self.question_type_combo.setStyleSheet(style)
+        except Exception:
+            pass
+
     def _create_position_input_group(self, title, x_edit_attr, y_edit_attr, button_attr, pos_name):
         """辅助函数：创建一个用于设置坐标的位置输入UI组。"""
         # 创建UI组件
-        group_box = QGroupBox("")  # 组的标题由外部QLabel提供，保持UI一致性
+        group_box = QWidget()  # 组的标题由外部QLabel提供，保持UI一致性
         layout = QHBoxLayout()
         # 更紧凑的布局间距与外边距
         try:

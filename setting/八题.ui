@@ -426,7 +426,7 @@ QScrollBar::sub-line:horizontal {
              </sizepolicy>
             </property>
             <property name="text">
-             <string>百度智能云文字识别OCR密钥：</string>
+             <string>百度智能云手写文字识别OCR密钥：</string>
             </property>
            </widget>
           </item>

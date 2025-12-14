@@ -107,6 +107,11 @@ class ConfigManager:
         self.ocr_mode_index = self.OCR_MODE_PURE_AI  # 默认使用纯AI模式
         self.baidu_ocr_api_key = ""
         self.baidu_ocr_secret_key = ""
+        # 持久化的百度OCR access_token 与过期时间（可选）
+        self.baidu_ocr_access_token = ""
+        self.baidu_ocr_token_expires_at = 0.0  # unix timestamp
+        # 提前刷新 margin（秒），当剩余寿命小于该值时会触发刷新（默认 60s）
+        self.baidu_ocr_token_refresh_margin = 60
         # OCR质量等级（新增）：relaxed/moderate/strict
         self.ocr_quality_level = "moderate"  # 默认适度
         # 分数步长（新增）：0.5或1
@@ -193,6 +198,23 @@ class ConfigManager:
             self.ocr_mode_index = self._legacy_ocr_text_to_index.get(str(ocr_mode_raw), self.OCR_MODE_PURE_AI)
         self.baidu_ocr_api_key = self._get_config_safe('OCR', 'baidu_ocr_api_key', "")
         self.baidu_ocr_secret_key = self._get_config_safe('OCR', 'baidu_ocr_secret_key', "")
+        # Load persisted token (if any)
+        try:
+            self.baidu_ocr_access_token = self._get_config_safe('OCR', 'baidu_ocr_access_token', "")
+            expires_raw = self._get_config_safe('OCR', 'baidu_ocr_token_expires_at', "0")
+            try:
+                self.baidu_ocr_token_expires_at = float(expires_raw)
+            except Exception:
+                self.baidu_ocr_token_expires_at = 0.0
+            # token refresh margin
+            try:
+                self.baidu_ocr_token_refresh_margin = int(self._get_config_safe('OCR', 'baidu_ocr_token_refresh_margin', self.baidu_ocr_token_refresh_margin))
+            except Exception:
+                self.baidu_ocr_token_refresh_margin = 60
+        except Exception:
+            self.baidu_ocr_access_token = ""
+            self.baidu_ocr_token_expires_at = 0.0
+            self.baidu_ocr_token_refresh_margin = 60
         # 加载OCR质量阈值
         self.ocr_confidence_avg_threshold = float(self._get_config_safe('OCR', 'ocr_confidence_avg_threshold', self.ocr_confidence_avg_threshold))
         self.ocr_confidence_min_threshold = float(self._get_config_safe('OCR', 'ocr_confidence_min_threshold', self.ocr_confidence_min_threshold))
@@ -329,8 +351,25 @@ class ConfigManager:
                 self.ocr_mode_index = self.OCR_MODE_BAIDU_OCR
             else:
                 self.ocr_mode_index = self.OCR_MODE_PURE_AI
-        elif field_name == 'baidu_ocr_api_key': self.baidu_ocr_api_key = str(value) if value else ""
-        elif field_name == 'baidu_ocr_secret_key': self.baidu_ocr_secret_key = str(value) if value else ""
+        elif field_name == 'baidu_ocr_api_key':
+            self.baidu_ocr_api_key = str(value) if value else ""
+            # API Key 变更时也清理旧 token
+            self.baidu_ocr_access_token = ""
+            self.baidu_ocr_token_expires_at = 0.0
+            try:
+                self._save_config_to_file()
+            except Exception:
+                pass
+        elif field_name == 'baidu_ocr_secret_key':
+            # 当 Secret Key 发生变化时，应清除已持久化的 access_token
+            self.baidu_ocr_secret_key = str(value) if value else ""
+            self.baidu_ocr_access_token = ""
+            self.baidu_ocr_token_expires_at = 0.0
+            # 立即持久化更改
+            try:
+                self._save_config_to_file()
+            except Exception:
+                pass
         elif field_name == 'ocr_quality_level': self.ocr_quality_level = str(value) if value else 'moderate'
         elif field_name == 'score_rounding_step':
             try:
@@ -413,6 +452,10 @@ class ConfigManager:
                 'ocr_confidence_avg_threshold': str(self.ocr_confidence_avg_threshold),
                 'ocr_confidence_min_threshold': str(self.ocr_confidence_min_threshold),
                 'ocr_confidence_low_line_ratio': str(self.ocr_confidence_low_line_ratio),
+                # 持久化 token（注意：出于安全考虑，不建议在多用户环境下长期保存）
+                'baidu_ocr_access_token': str(self.baidu_ocr_access_token),
+                'baidu_ocr_token_expires_at': str(self.baidu_ocr_token_expires_at),
+                'baidu_ocr_token_refresh_margin': str(self.baidu_ocr_token_refresh_margin),
             }
             
             for i in range(1, self.max_questions + 1):
