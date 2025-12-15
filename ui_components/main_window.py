@@ -306,8 +306,12 @@ class MainWindow(QMainWindow):
                 step_combo = self.get_ui_element(f'score_rounding_step_{i}')
                 if step_combo and isinstance(step_combo, QComboBox):
                     step_value = q_config.get('score_rounding_step', 0.5)
-                    # 将步长值转为显示文本（0.5 显示为 "0.5"，1.0 显示为 "1"）
-                    step_text = "1" if step_value == 1.0 else "0.5"
+                    # 将步长值转为显示文本，支持 0.5, 1, 1.5, 2
+                    # 整数显示为不带小数点的形式（如 1），浮点数保持小数形式（如 0.5, 1.5）
+                    if step_value == int(step_value):
+                        step_text = str(int(step_value))
+                    else:
+                        step_text = str(step_value)
                     step_combo.setCurrentText(step_text)
                 
                 # 加载每题独立的OCR模式
@@ -987,8 +991,18 @@ class MainWindow(QMainWindow):
 
         dialog.config_updated.connect(on_config_updated)
 
-        if dialog.exec_() == QDialog.Accepted:
-            self.load_config_to_ui()
+        # 在显示配置对话框前隐藏主界面，避免遮挡改卷页面
+        self.hide()
+        self.log_message(f"配置第{question_index}题信息，主界面已隐藏")
+        
+        try:
+            result = dialog.exec_()
+            if result == QDialog.Accepted:
+                self.load_config_to_ui()
+        finally:
+            # 无论保存还是取消，都恢复主界面显示
+            self.show()
+            self.log_message("配置对话框已关闭，主界面已恢复")
 
     def get_or_create_answer_window(self, question_index):
         from .question_config_dialog import MyWindow2

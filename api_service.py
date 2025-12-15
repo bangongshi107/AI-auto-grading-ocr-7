@@ -70,7 +70,7 @@ import hmac
 import time
 import json
 from datetime import datetime
-from threading import Lock
+from threading import Lock, local
 
 # ==============================================================================
 #  UI文本到提供商ID的映射字典 (UI Text to Provider ID Mapping)
@@ -202,7 +202,9 @@ def get_ui_text_from_provider_id(provider_id: str) -> Optional[str]:
 class ApiService:
     def __init__(self, config_manager):
         self.config_manager = config_manager
-        self.session = requests.Session()
+        # requests.Session 不是严格线程安全；双评并发时会同时发起两次请求。
+        # 使用 thread-local 的 Session，既保留连接复用，又避免跨线程共享 Session。
+        self._thread_local = local()
         self.logger = logging.getLogger(__name__)
         # 初始化当前题目索引，虽然主要逻辑在AutoThread中，但这里有个默认值更安全
         self.current_question_index = 1
@@ -216,6 +218,14 @@ class ApiService:
         except Exception:
             self._baidu_ocr_access_token = None
             self._baidu_ocr_token_expires_at = 0.0
+
+    def _get_session(self) -> requests.Session:
+        """获取当前线程专属的 requests.Session。"""
+        sess = getattr(self._thread_local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            self._thread_local.session = sess
+        return sess
 
     def _get_baidu_ocr_access_token(self) -> Tuple[Optional[str], Optional[str]]:
         """获取百度OCR access_token（带缓存与自动刷新）。
@@ -247,7 +257,7 @@ class ApiService:
 
             try:
                 self.logger.debug("准备获取百度OCR access_token")
-                token_response = self.session.post(token_url, data=token_params, timeout=10)
+                token_response = self._get_session().post(token_url, data=token_params, timeout=10)
                 token_data = token_response.json()
 
                 access_token = token_data.get("access_token")
@@ -657,10 +667,10 @@ class ApiService:
             # 根据格式选择传递方式
             if use_json_format:
                 headers["Content-Type"] = "application/json"
-                response = self.session.post(url, headers=headers, json=payload, timeout=60)
+                response = self._get_session().post(url, headers=headers, json=payload, timeout=60)
             else:
                 # form-data格式（用于百度OCR等）
-                response = self.session.post(url, headers=headers, data=payload, timeout=60)
+                response = self._get_session().post(url, headers=headers, data=payload, timeout=60)
 
             self.logger.debug(f"[{provider_name}] 收到响应: 状态码 {response.status_code}")
             
@@ -805,7 +815,7 @@ class ApiService:
                 "detect_alteration": "true",
             }
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
-            response = self.session.post(url, headers=headers, data=payload, timeout=30)
+            response = self._get_session().post(url, headers=headers, data=payload, timeout=30)
             if response.status_code != 200:
                 return None, f"百度Handwriting请求失败: {response.status_code} {response.text[:200]}"
             return response.json(), None

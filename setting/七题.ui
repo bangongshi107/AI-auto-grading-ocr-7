@@ -381,7 +381,7 @@ QScrollBar::sub-line:horizontal {
              <string/>
             </property>
             <property name="placeholderText">
-             <string>API密钥/Access Token</string>
+             <string>API密钥（纯AI识图 必须视觉大模型）</string>
             </property>
            </widget>
           </item>
@@ -397,7 +397,7 @@ QScrollBar::sub-line:horizontal {
              <string/>
             </property>
             <property name="placeholderText">
-             <string>AI模型/ID</string>
+             <string>AI模型/ID（纯AI识图 必须视觉大模型）</string>
             </property>
            </widget>
           </item>
@@ -620,7 +620,7 @@ QScrollBar::sub-line:horizontal {
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>API密钥/Access Token</string>
+             <string>API密钥（此AI仅双评启用）</string>
             </property>
            </widget>
           </item>
@@ -633,7 +633,7 @@ QScrollBar::sub-line:horizontal {
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>AI模型/ID（此AI仅双评启用）</string>
+             <string>AI模型/ID（纯AI识图 必须视觉大模型）</string>
             </property>
            </widget>
           </item>
@@ -712,6 +712,16 @@ QScrollBar::sub-line:horizontal {
                 <item>
                  <property name="text">
                   <string>1</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>1.5</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>2</string>
                  </property>
                 </item>
                </widget>
