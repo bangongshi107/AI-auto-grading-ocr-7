@@ -1549,6 +1549,11 @@ class GradingThread(QThread):
         if height < 0:
             y = y + height
             height = abs(height)
+        
+        # === 重要：截图前延迟1秒，确保主窗口和答题框窗口已完全隐藏 ===
+        # 这样可以避免截图时捕获到程序界面的文字
+        self.log_signal.emit("等待1秒以确保程序界面已隐藏...", False, "INFO")
+        time.sleep(1.0)
 
         # 内部实现函数
         def _do_capture():
@@ -2454,7 +2459,25 @@ class GradingThread(QThread):
                     self.log_signal.emit(f"AI提取的学生答案摘要为空。", True, "WARNING")
             self.log_signal.emit(f"AI评分依据: {scoring_basis}", False, "RESULT")
 
-            # 检查是否为无法识别的情况，如果是则停止阅卷
+            # 【优先检查】AI是否明确请求人工介入（必须在"无法识别"检查之前，以保证人工介入信号优先级最高）
+            manual_msg = self._detect_manual_intervention_feedback(student_answer_summary, scoring_basis)
+            if manual_msg:
+                error_msg = f"检测到AI请求人工介入: {manual_msg}"
+                self.log_signal.emit(error_msg, True, "ERROR")
+                self.log_signal.emit(f"[调试] 人工介入信息 - student_answer_summary: {student_answer_summary[:100] if student_answer_summary else '(空)'}", False, "DEBUG")
+                self.log_signal.emit(f"[调试] 人工介入信息 - scoring_basis: {scoring_basis[:200] if scoring_basis else '(空)'}", False, "DEBUG")
+                # 在 OCR 模式下， AI 不返回摘要，此时将 OCR 原文传给 UI 便于人工复核
+                display_text = student_answer_summary if student_answer_summary else (ocr_text if ocr_text else "")
+                try:
+                    self.log_signal.emit(f"[调试] 正在发送人工介入信号，message: {error_msg}, display_text长度: {len(display_text)}", False, "DEBUG")
+                    self.manual_intervention_signal.emit(error_msg, display_text)
+                    self.log_signal.emit(f"[调试] 人工介入信号发送成功", False, "DEBUG")
+                except Exception as e:
+                    self.log_signal.emit(f"[警告] 发送人工介入信号失败: {e}", True, "WARNING")
+                # 返回带有标记的结构，便于上层立即停止且不重试；raw_feedback 同样使用 display_text
+                return False, {'manual_intervention': True, 'message': error_msg, 'raw_feedback': display_text}
+
+            # 检查是否为无法识别的情况，如果是则停止阅卷（在人工介入检查之后）
             if ocr_mode and (not student_answer_summary):
                 # OCR 模式下可能不会返回 student_answer_summary，尝试从 scoring_basis 中检测无法识别的信号
                 unrecognizable_keywords = [
@@ -2472,20 +2495,6 @@ class GradingThread(QThread):
                     error_msg = f"学生答案图片无法识别，停止阅卷。请检查图片质量或手动处理。AI反馈: {student_answer_summary}"
                     self.log_signal.emit(error_msg, True, "ERROR")
                     return False, error_msg
-
-            # 检查AI是否明确请求人工介入（OCR相关的停止信号）
-            manual_msg = self._detect_manual_intervention_feedback(student_answer_summary, scoring_basis)
-            if manual_msg:
-                error_msg = f"检测到AI请求人工介入: {manual_msg}"
-                self.log_signal.emit(error_msg, True, "ERROR")
-                # 在 OCR 模式下， AI 不返回摘要，此时将 OCR 原文传给 UI 便于人工复核
-                display_text = student_answer_summary if student_answer_summary else (ocr_text if ocr_text else "")
-                try:
-                    self.manual_intervention_signal.emit(error_msg, display_text)
-                except Exception:
-                    pass
-                # 返回带有标记的结构，便于上层立即停止且不重试；raw_feedback 同样使用 display_text
-                return False, {'manual_intervention': True, 'message': error_msg, 'raw_feedback': display_text}
 
             # 检查AI是否在请求提供学生答案图片内容，如果是则停止阅卷并等待用户介入
             if self._is_ai_requesting_image_content(student_answer_summary, scoring_basis):
@@ -2607,13 +2616,30 @@ class GradingThread(QThread):
         """
         检测AI返回的摘要或评分依据中是否包含指示需要人工介入的信号。
         返回匹配到的简短消息（str）或空字符串/None表示未检测到。
+        
+        优先级：
+        1. 检查 scoring_basis（最关键，优先级最高）
+        2. 检查 student_answer_summary（其次）
         """
-        # 优先检测显式人工介入前缀（严格且明确）
+        # 【最高优先级】优先检测 scoring_basis 中的显式人工介入前缀（严格且明确）
+        try:
+            if isinstance(scoring_basis, str):
+                s_trim = scoring_basis.strip()
+                # 支持英文冒号和中文冒号
+                if (s_trim.startswith('需人工介入:') or s_trim.startswith('需人工介入：') or
+                    s_trim.startswith('需要人工介入:') or s_trim.startswith('需要人工介入：')):
+                    return '需人工介入 (评分依据)'
+        except Exception:
+            pass
+
+        # 【次优先级】再检查 student_answer_summary
         try:
             if isinstance(student_answer_summary, str):
                 s_trim = student_answer_summary.strip()
-                if s_trim.startswith('需人工介入:') or s_trim.startswith('需人工介入：'):
-                    return '需人工介入'
+                # 支持英文冒号和中文冒号
+                if (s_trim.startswith('需人工介入:') or s_trim.startswith('需人工介入：') or
+                    s_trim.startswith('需要人工介入:') or s_trim.startswith('需要人工介入：')):
+                    return '需人工介入 (答案摘要)'
         except Exception:
             pass
 
@@ -2625,7 +2651,7 @@ class GradingThread(QThread):
 
         # 使用正则与同义词映射进行鲁棒检测（后处理层主判断）
         patterns = [
-            r'需人工介入', r'人工介入', r'需人工复核', r'人工复核',
+            r'需(?:要)?人工介入', r'人工介入', r'需(?:要)?人工复核', r'人工复核',
             r'无法(?:判定|评判|判断|评分|识别)', r'识别失败', r'识别错误', r'乱码', r'噪声太大',
             r'\bmanual intervention\b', r'\bneed manual\b', r'\bcannot (?:judge|score)\b', r'\bunclear\b', r'\brequires manual\b'
         ]

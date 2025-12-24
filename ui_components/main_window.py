@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         self.answer_windows = {}
         self.current_question = 1
         self.max_questions = 7  # 多题模式最多支持7道题（已移除第8题）
-        self.shortcut_esc = QShortcut(QKeySequence("Ctrl+Shift+Escape"), self)
+        self.shortcut_esc = QShortcut(QKeySequence("Escape"), self)
         self.shortcut_esc.activated.connect(self.stop_auto_thread)
         self._ui_cache = {}
 
@@ -386,13 +386,8 @@ class MainWindow(QMainWindow):
         msg_box.setDefaultButton(ok_button)
         msg_box.exec_()
 
-        # 用户确认后，显示倒计时并延迟启动
-        self.log_message("正在准备启动自动阅卷，请等待5秒...")
-        from PyQt5.QtCore import QTimer
-        countdown_timer = QTimer(self)
-        countdown_timer.setSingleShot(True)
-        countdown_timer.timeout.connect(lambda: self._start_auto_evaluation_after_confirmation())
-        countdown_timer.start(5000)  # 5秒后启动
+        # 用户确认后，直接启动自动阅卷（无延迟）
+        self._start_auto_evaluation_after_confirmation()
 
     def _start_auto_evaluation_after_confirmation(self):
         """用户确认后延迟启动自动阅卷"""
@@ -460,6 +455,18 @@ class MainWindow(QMainWindow):
             }
 
             self.worker.set_parameters(**params)
+            
+            # === 重要：在启动阅卷前，隐藏所有答题框窗口和最小化主窗口 ===
+            # 1. 隐藏所有答题框窗口
+            for q_idx, answer_window in list(self.answer_windows.items()):
+                if answer_window and answer_window.isVisible():
+                    answer_window.hide()
+                    self.log_message(f"已隐藏第{q_idx}题答题框窗口")
+            
+            # 2. 最小化主窗口，避免遮挡答题卡
+            self.showMinimized()
+            self.log_message("主窗口已最小化，准备开始截图和阅卷")
+            
             self.worker.start()
             self.update_ui_state(is_running=True)
             

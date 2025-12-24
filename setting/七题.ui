@@ -69,9 +69,7 @@ QTextEdit,
 QSpinBox,
 QComboBox {
     background-color: #FFFFFF;
-    border: 1px solid #BFD8FF;
-    border-left: 3px solid #7FB0FF;
-    border-right: 3px solid #7FB0FF;
+    border: 3px solid #5B9FFF;
     border-radius: 4px;
     padding: 4px 6px;
 }
@@ -81,7 +79,7 @@ QPlainTextEdit:focus,
 QTextEdit:focus,
 QSpinBox:focus,
 QComboBox:focus {
-    border-color: #7FB0FF;
+    border: 3px solid #4A8EF5;
 }
 
 /* 只读/不可编辑：用偏灰蓝底 + 更弱文字/边框，和可输入控件明显区分 */
@@ -381,7 +379,7 @@ QScrollBar::sub-line:horizontal {
              <string/>
             </property>
             <property name="placeholderText">
-             <string>API密钥（纯AI识图 必须视觉大模型）</string>
+             <string>API key  纯如AI识图须视觉大模型</string>
             </property>
            </widget>
           </item>
@@ -397,7 +395,7 @@ QScrollBar::sub-line:horizontal {
              <string/>
             </property>
             <property name="placeholderText">
-             <string>AI模型/ID（纯AI识图 必须视觉大模型）</string>
+             <string>AI模型ID  如纯AI识图须视觉大模型</string>
             </property>
            </widget>
           </item>
@@ -620,7 +618,7 @@ QScrollBar::sub-line:horizontal {
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>API密钥（此AI仅双评启用）</string>
+             <string>API key（此AI仅双评启用）</string>
             </property>
            </widget>
           </item>
@@ -633,7 +631,7 @@ QScrollBar::sub-line:horizontal {
              </sizepolicy>
             </property>
             <property name="placeholderText">
-             <string>AI模型/ID（纯AI识图 必须视觉大模型）</string>
+             <string>AI模型ID 如纯AI识图须视觉大模型</string>
             </property>
            </widget>
           </item>

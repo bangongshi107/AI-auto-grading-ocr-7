@@ -109,25 +109,25 @@ class SimpleNotificationDialog(QDialog):
         # 立即播放一次
         self.play_system_sound()
 
-        # 设置2分钟重复定时器
+        # 设置30秒重复定时器，确保用户不会错过提醒
         self.sound_timer = QTimer()
         self.sound_timer.timeout.connect(self.play_system_sound)
-        self.sound_timer.start(120000)  # 60秒 = 1分钟
+        self.sound_timer.start(30000)  # 30秒重复一次
 
     def play_system_sound(self):
-        """播放系统默认提示音，跟随用户系统设置"""
+        """播放系统默认提示音，错误情况使用更清晰的警告音"""
         try:
             if self.sound_type == 'error':
-                # 系统错误声音
-                # Use default system sound; keep it simple and cross-version compatible
-                winsound.MessageBeep(-1)
+                # 错误声音：连续两次beep以吸引用户注意
+                winsound.Beep(1000, 300)  # 较高音调，300ms
+                winsound.Beep(1000, 300)  # 重复，增强存在感
             else:
-                # 系统信息声音
-                winsound.MessageBeep(-1)
+                # 信息声音：单次beep
+                winsound.Beep(800, 200)
         except Exception:
-            # 如果系统声音不可用，使用默认beep
+            # 如果系统声音不可用，回退到系统消息提示音
             try:
-                winsound.Beep(800, 300)  # 备用方案
+                winsound.MessageBeep(-1)
             except Exception:
                 pass  # 完全静默失败
 
@@ -195,18 +195,21 @@ class ManualInterventionDialog(QDialog):
         self.setLayout(layout)
 
     def setup_sound_timer(self):
-        # 立即播放并每2分钟重复一次
+        # 立即播放并每30秒重复一次，确保用户能及时注意到需要人工介入
         self.play_system_sound()
         self.sound_timer = QTimer()
         self.sound_timer.timeout.connect(self.play_system_sound)
-        self.sound_timer.start(120000)
+        self.sound_timer.start(30000)  # 30秒重复一次
 
     def play_system_sound(self):
+        """播放需要人工介入的警告音"""
         try:
-            winsound.MessageBeep(-1)
+            # 使用三次连续beep制造更清晰的警告效果
+            for _ in range(3):
+                winsound.Beep(1000, 250)  # 较高音调，每次250ms
         except Exception:
             try:
-                winsound.Beep(800, 300)
+                winsound.MessageBeep(-1)  # 回退到系统错误音
             except Exception:
                 pass
 
@@ -423,6 +426,12 @@ class Application:
             parent=self.main_window
         )
         dialog.exec_()
+        
+        # 对话框关闭后，确保主窗口恢复并显示在前台
+        if self.main_window.isMinimized():
+            self.main_window.showNormal()
+        self.main_window.raise_()  # 将窗口提升到最前
+        self.main_window.activateWindow()  # 激活窗口
 
     def show_error_notification(self, error_message):
         """显示错误通知并恢复主窗口状态"""
@@ -441,6 +450,12 @@ class Application:
             parent=self.main_window
         )
         dialog.exec_()
+        
+        # 对话框关闭后，确保主窗口恢复并显示在前台
+        if self.main_window.isMinimized():
+            self.main_window.showNormal()
+        self.main_window.raise_()  # 将窗口提升到最前
+        self.main_window.activateWindow()  # 激活窗口
 
     def show_threshold_exceeded_notification(self, reason):
         """显示双评分差超过阈值的通知并恢复主窗口状态"""
@@ -460,6 +475,12 @@ class Application:
             parent=self.main_window
         )
         dialog.exec_()
+        
+        # 对话框关闭后，确保主窗口恢复并显示在前台
+        if self.main_window.isMinimized():
+            self.main_window.showNormal()
+        self.main_window.raise_()  # 将窗口提升到最前
+        self.main_window.activateWindow()  # 激活窗口
 
     def show_manual_intervention_notification(self, message, raw_feedback):
         """当工作线程请求人工介入时调用，展示更明显的模态对话框并播放提示音。"""
@@ -484,6 +505,12 @@ class Application:
             self.main_window.log_message("用户确认已人工处理，若要继续，请手动重新启动自动阅卷。")
         else:
             self.main_window.log_message("用户选择暂停并手动处理当前项。请在处理完成后手动重启阅卷。")
+        
+        # 对话框关闭后，确保主窗口恢复并显示在前台
+        if self.main_window.isMinimized():
+            self.main_window.showNormal()
+        self.main_window.raise_()  # 将窗口提升到最前
+        self.main_window.activateWindow()  # 激活窗口
 
     def load_config(self):
         """加载配置并设置到主窗口"""

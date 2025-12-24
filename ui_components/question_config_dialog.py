@@ -571,11 +571,15 @@ class QuestionConfigDialog(QDialog):
         submit_pos_val = self.question_config.get('confirm_button_pos') if self.question_config else None
         submit_x, submit_y = submit_pos_val if submit_pos_val is not None else (0, 0)
         self.submit_x_edit.setText(str(submit_x))
+        self.submit_x_edit.setReadOnly(True)
+        self.submit_x_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         submit_group_content_layout.addWidget(self.submit_x_edit)
         
         submit_group_content_layout.addWidget(QLabel("Y:"))
         self.submit_y_edit = QLineEdit()
         self.submit_y_edit.setText(str(submit_y))
+        self.submit_y_edit.setReadOnly(True)
+        self.submit_y_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         submit_group_content_layout.addWidget(self.submit_y_edit)
         
         set_submit_button = QPushButton("设置提交按钮位置")
@@ -604,11 +608,15 @@ class QuestionConfigDialog(QDialog):
         next_pos_val = self.question_config.get('next_button_pos') if self.question_config else None
         current_next_x, current_next_y = next_pos_val if next_pos_val is not None else (0, 0)
         self.next_x_edit.setText(str(current_next_x))
+        self.next_x_edit.setReadOnly(True)
+        self.next_x_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         next_coord_and_button_layout.addWidget(self.next_x_edit)
         
         next_coord_and_button_layout.addWidget(QLabel("Y:"))
         self.next_y_edit = QLineEdit()
         self.next_y_edit.setText(str(current_next_y))
+        self.next_y_edit.setReadOnly(True)
+        self.next_y_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         next_coord_and_button_layout.addWidget(self.next_y_edit)
         
         self.set_next_button = QPushButton("设置翻页按钮位置")
@@ -638,12 +646,16 @@ class QuestionConfigDialog(QDialog):
         self.answer_x1_edit = QLineEdit()
         answer_x1 = answer_area_config.get('x1', 0) # 直接从 answer_area_config 获取
         self.answer_x1_edit.setText(str(answer_x1))
+        self.answer_x1_edit.setReadOnly(True)
+        self.answer_x1_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         answer_coord_layout_tl.addWidget(self.answer_x1_edit)
         
         answer_coord_layout_tl.addWidget(QLabel("Y:"))
         self.answer_y1_edit = QLineEdit()
         answer_y1 = answer_area_config.get('y1', 0)
         self.answer_y1_edit.setText(str(answer_y1))
+        self.answer_y1_edit.setReadOnly(True)
+        self.answer_y1_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         answer_coord_layout_tl.addWidget(self.answer_y1_edit)
         answer_group_main_layout.addLayout(answer_coord_layout_tl)
         
@@ -654,12 +666,16 @@ class QuestionConfigDialog(QDialog):
         self.answer_x2_edit = QLineEdit()
         answer_x2 = answer_area_config.get('x2', 0)
         self.answer_x2_edit.setText(str(answer_x2))
+        self.answer_x2_edit.setReadOnly(True)
+        self.answer_x2_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         answer_coord_layout_br.addWidget(self.answer_x2_edit)
         
         answer_coord_layout_br.addWidget(QLabel("Y:"))
         self.answer_y2_edit = QLineEdit()
         answer_y2 = answer_area_config.get('y2', 0)
         self.answer_y2_edit.setText(str(answer_y2))
+        self.answer_y2_edit.setReadOnly(True)
+        self.answer_y2_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
         answer_coord_layout_br.addWidget(self.answer_y2_edit)
         answer_group_main_layout.addLayout(answer_coord_layout_br)
 
@@ -729,6 +745,12 @@ class QuestionConfigDialog(QDialog):
         setattr(self, x_edit_attr, x_edit)
         setattr(self, y_edit_attr, y_edit)
         setattr(self, button_attr, set_button)
+        
+        # 设置坐标输入框为只读，并移除加粗蓝边
+        x_edit.setReadOnly(True)
+        x_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
+        y_edit.setReadOnly(True)
+        y_edit.setStyleSheet("background-color: #F2F7FF; color: #5E6F80; border: 1px dashed #AFCBFF; border-radius: 4px; padding: 4px 6px;")
 
         # 布局
         layout.addWidget(QLabel("X:"))
@@ -845,10 +867,15 @@ class QuestionConfigDialog(QDialog):
             self.set_answer_button.setText("重新框定答案区域")
             self.set_answer_button.setStyleSheet("")
 
+            # === 立即隐藏答案框窗口（在set_confirmed_mode之前） ===
+            # 这样可以确保用户点击确认后，答题框立即消失
+            answer_window.hide()
+            self._log_message(f"第{self.question_index}题答题框窗口已立即隐藏")
+            
             # 设置为已确认模式
             answer_window.set_confirmed_mode()
 
-            # 关闭答案框窗口
+            # 关闭答案框窗口（cleanup）
             answer_window.close()
         except Exception as e:
             self._log_message(f"确认第{self.question_index}题答案区域出错: {str(e)}", is_error=True)
